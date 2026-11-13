@@ -2,14 +2,168 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Design tokens.
+  Semantic names only: components never reference raw colours.
+  Light theme is the default; dark follows prefers-color-scheme unless
+  the user picks one explicitly (next-themes sets data-theme on <html>).
+*/
 :root {
-  --background: #090d16;
-  --foreground: #f1f5f9;
+  --surface: #f6f6f4;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eeeeea;
+  --border: #e1e1dc;
+  --border-strong: #c6c6bf;
+
+  --text: #1b2230;
+  --text-muted: #5b6472;
+  --text-faint: #6b7380;
+
+  --primary: #1b2a41;
+  --primary-fg: #ffffff;
+
+  --accent: #2e6b6e;
+  --accent-fg: #ffffff;
+  --accent-soft: #e4eeee;
+
+  --success: #3f7d5a;
+  --success-soft: #e6f0ea;
+  --warning: #9a6b1e;
+  --warning-soft: #f5eedd;
+  --danger: #a1433c;
+  --danger-soft: #f5e5e3;
+
+  --focus: #2e6b6e;
+  --radius: 4px;
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  min-height: 100vh;
+:root[data-theme="dark"] {
+  --surface: #111722;
+  --surface-raised: #171f2c;
+  --surface-sunken: #0d121b;
+  --border: #273040;
+  --border-strong: #36405a;
+
+  --text: #e6e9ee;
+  --text-muted: #a3acb9;
+  --text-faint: #8791a0;
+
+  --primary: #c7d2e6;
+  --primary-fg: #111722;
+
+  --accent: #5aa3a6;
+  --accent-fg: #0d121b;
+  --accent-soft: #1a2d2f;
+
+  --success: #6fb08a;
+  --success-soft: #16281f;
+  --warning: #d1a65a;
+  --warning-soft: #2d2512;
+  --danger: #d47c74;
+  --danger-soft: #2f1a19;
+
+  --focus: #5aa3a6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #111722;
+    --surface-raised: #171f2c;
+    --surface-sunken: #0d121b;
+    --border: #273040;
+    --border-strong: #36405a;
+
+    --text: #e6e9ee;
+    --text-muted: #a3acb9;
+    --text-faint: #8791a0;
+
+    --primary: #c7d2e6;
+    --primary-fg: #111722;
+
+    --accent: #5aa3a6;
+    --accent-fg: #0d121b;
+    --accent-soft: #1a2d2f;
+
+    --success: #6fb08a;
+    --success-soft: #16281f;
+    --warning: #d1a65a;
+    --warning-soft: #2d2512;
+    --danger: #d47c74;
+    --danger-soft: #2f1a19;
+
+    --focus: #5aa3a6;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  html[data-theme="dark"] {
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) {
+      color-scheme: dark;
+    }
+  }
+
+  body {
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  h1,
+  h2.serif {
+    font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  /* Numbers line up in tables and tick smoothly. */
+  .num,
+  table td,
+  input[type="number"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Visible, consistent focus ring for keyboard users. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 }

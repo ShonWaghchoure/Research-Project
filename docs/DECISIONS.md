@@ -295,3 +295,66 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 
 5. **ReputationAnchor**:
    - Leaf = `keccak256(abi.encodePacked(participant, scoreBp, evidenceCount))`; OZ MerkleProof (commutative pair hashing).
+
+---
+
+## Phase 8: Frontend Foundation
+
+1. **Phase 7 is not built yet (teammate in progress), so the frontend runs against a mock.**
+   - `frontend/mock/server.mjs` implements the Phase 7 API from GEMINI.md: `/intervals/current`, `/intervals/{id}`,
+     `/price-history`, `/orderbook`, `/positions`, `/positions/{id}/reveal`, `/positions/mine`, `/trades`,
+     `/trades/{id}`, `/reputation/{address}`, plus `/grid/status` and the `/ws` channels
+     (interval, price, trades, reputation, grid, flags). It also serves the Phase 6 auth and participant routes.
+   - It acts as the operator on the local Hardhat chain: it calls `Settlement.openInterval` for every interval and
+     checks each reveal against the on-chain commit. Wallet transactions (faucet, stake, register, deposit, commit)
+     are real.
+   - Assumed response shapes live in `frontend/src/lib/api/types.ts` (marked "Phase 7"). When the real backend lands:
+     run `make gen-api`, reconcile that file, and point `NEXT_PUBLIC_API_URL` at the backend.
+   - Assumed extras the real Phase 7 should provide or the UI should drop: `Interval.commit_deadline`,
+     `reveal_deadline`, `prev_p_ref_paise`, `active_participants`; `Reputation.components`, `intervals_to_trusted`,
+     `volume_cap_kwh`; `GET /grid/status`; `Trade.status`; `POST /positions/{id}/reveal` body `{tx_hash}`.
+
+2. **Interval must be open on chain before the API reports COMMIT.** Found by the end-to-end test: the operator's
+   `openInterval` transaction landed about 7 s after the interval started, so the on-chain commit window was 13 s while
+   the API advertised 20 s, and a commit near the end reverted with "commit closed". The mock now stays in OPEN until
+   `openInterval` is confirmed. **Phase 7's clock worker should do the same.**
+
+3. **Commit safety margin.** The trade page refuses new commits in the last 5 s of the commit window
+   (signature + mining time) and says why, instead of letting the transaction revert.
+
+4. **Commit hash computed in the browser and cross-checked.** The salt is generated with `crypto.getRandomValues`.
+   The page computes `keccak256(abi.encode(intervalId, participant, side, qtyWh, limitPricePaise, deadline, salt))`
+   and refuses to commit if the server's hash differs. Unit tests pin the encoding to values computed independently
+   with Python `eth_abi`.
+
+5. **Demo wallets.** On the local chain only, three Hardhat accounts (#2–#4) are offered as demo wallets through
+   wagmi's `mock` connector, so the app can be used without MetaMask. wagmi's mock connector forwards
+   `eth_accounts` to the node, which returns all 20 unlocked accounts with the operator first; without a pin every
+   demo wallet would sign and send as the operator. Each demo connector is pinned to its own address
+   (`frontend/src/lib/wagmi.ts`). Disabled when `NEXT_PUBLIC_CHAIN_ID` is not 31337 or
+   `NEXT_PUBLIC_DISABLE_DEMO_WALLET=true`.
+
+6. **Meter key for `Registry.register`.** The UI registers `keccak256("meter:" + lowercase address)`. A real
+   deployment would hash the meter's public key; the simulator's per-participant keys are not exposed to the browser.
+
+7. **Design system.** Requested direction: minimal, muted, professional, nothing bright.
+   - Semantic CSS variables (surface, border, text, primary, accent, success, warning, danger) with light and dark
+     themes; dark follows the OS unless the user picks one.
+   - Deep navy primary, one desaturated teal accent; status colours are muted and always paired with text or an icon.
+   - Inter for UI, Source Serif 4 for page titles only, tabular numerals for all numbers.
+   - 8 px spacing scale (Tailwind `spacing` overridden: `1` = 8 px). 1 px borders, no shadows, 4 px radius.
+   - Every page: header → key-figure row → main panel → secondary panels.
+   - Desktop: fixed left sidebar. Mobile: bottom tab bar with the four main destinations.
+   - Motion: countdown ring, price tweening and the landing walk-through only; all disabled under
+     `prefers-reduced-motion`.
+
+8. **Session storage.** The JWT is kept in `sessionStorage` (cleared when the tab closes) rather than
+   `localStorage`, and the session is ignored if it belongs to a different wallet from the connected one.
+
+9. **Shell-free pages.** Landing and onboarding render without the sidebar and do not open the WebSocket.
+
+10. **Phase 9 pages.** Market, Grid, Reputation and Fairness are in the navigation with a short placeholder, so the
+    structure is final now and Phase 9 only fills them in.
+
+11. **`/status`.** Shon's Phase 6 health and login demo page is kept as a plain System status page
+    (backend health, session, contract addresses) instead of being deleted.

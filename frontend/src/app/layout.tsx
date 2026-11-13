@@ -1,21 +1,40 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter, Source_Serif_4 } from "next/font/google";
+import { headers } from "next/headers";
+import { cookieToInitialState } from "wagmi";
 import "./globals.css";
 import { Providers } from "./providers";
+import { config } from "@/lib/wagmi";
+import { Shell } from "@/components/layout/shell";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const serif = Source_Serif_4({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  weight: ["400", "500", "600"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Fair and Trustworthy P2P Energy Trading",
-  description: "Phase 0 Walking Skeleton - Live Chain & Health Verification",
+  title: { default: "P2P Energy Market", template: "%s · P2P Energy Market" },
+  description: "Fair and trustworthy peer-to-peer energy trading for Smart Grid 2.0.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6f6f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#111722" },
+  ],
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const initialState = cookieToInitialState(config, headers().get("cookie"));
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${serif.variable}`}>
       <body>
-        <Providers>{children}</Providers>
+        <Providers initialState={initialState}>
+          <Shell>{children}</Shell>
+        </Providers>
       </body>
     </html>
   );
