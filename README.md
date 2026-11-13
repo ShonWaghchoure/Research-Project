@@ -14,7 +14,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 |-------|------|--------|
 | **0** | Walking skeleton | ✅ **Done** |
 | **1** | Pricing engine (SDR) | ✅ **Done** |
-| 2 | Matching and clearing engine | ⬜ Pending |
+| **2** | Matching and clearing engine | ✅ **Done** |
 | 3 | Reputation, defenses, fairness | ⬜ Pending |
 | 4 | Simulator and baselines | ⬜ Pending |
 | 5 | Smart contracts | ⬜ Pending |
@@ -147,6 +147,37 @@ mypy app          →  Success: no issues found in 15 source files
 
 Built: `backend/app/engine/pricing.py` (`Position`, `PriceResult`, `compute_reference_price`, `price_impact`)
 Tests: `backend/tests/engine/test_pricing.py`
+
+---
+
+## Phase 2 Smoke Test Results
+
+```
+pytest tests/engine/ -v
+  41 passed
+  - grid: 13-node feeder, path(), pi matrix
+  - matching/clearing: qty caps, p_ref clearing, zero-capacity block,
+    unconstrained equivalence, ~3:1 proportional share, rho_min gate,
+    EV urgency, deterministic hashes, line loadings within capacity
+  - benchmark: n=50 ~0.06s, n=100 ~0.20s, n=200 ~0.91s
+  - hashing: canonical JSON, order-invariant input_root / result_hash
+  - EV: urgency clips, V2G sell qty
+
+pytest -v                 →  43 passed (~9s)    # pricing + clearing + health
+ruff check .              →  All checks passed
+mypy app                  →  Success: no issues found in 20 source files
+Hash determinism          →  identical across two local runs
+Docker hash identity      →  match_local_expected True (linux/amd64)
+```
+
+Built:
+- `backend/app/engine/grid.py` — radial feeder, `path`, `build_pi_matrix`, 13-node fixture
+- `backend/app/engine/matching.py` — vectorized cvxpy QP (Clarabel/OSQP/SCS)
+- `backend/app/engine/clearing.py` — `clear_interval` (price → match → Wh repair → hash)
+- `backend/app/engine/hashing.py` — canonical JSON, keccak256, Merkle `input_root`, `result_hash`
+- `backend/app/engine/ev.py` — urgency limit price + V2G sell qty
+
+Tests: `backend/tests/engine/test_{grid,matching via clearing,clearing,hashing,ev}.py`
 
 ---
 
