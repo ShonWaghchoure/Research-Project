@@ -19,7 +19,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **4** | Simulator and baselines | ✅ **Done** |
 | **5** | Smart contracts | ✅ **Done** |
 | **6** | Backend foundation | ✅ **Done** |
-| 7 | Market lifecycle | ⬜ Pending |
+| **7** | Market lifecycle | ✅ **Done** |
 | 8 | Frontend foundation | ⬜ Pending |
 | 9 | Frontend market views | ⬜ Pending |
 | 10 | Attack lab, audit, admin | ⬜ Pending |
