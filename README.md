@@ -341,6 +341,56 @@ Tests: `backend/tests/api/test_{auth,participants,admin_config}.py`
 
 ---
 
+## Phase 8 Smoke Test Results
+
+Phase 7 (market lifecycle) is being built by a teammate, so the frontend runs against
+`frontend/mock/server.mjs`, a mock of the Phase 7 API and WebSocket that follows the spec in `GEMINI.md`.
+Wallet transactions are real: faucet, stake, register, escrow deposit and commit all go to the local Hardhat
+contracts, and the mock opens each interval on chain and checks reveals against the on-chain commit.
+
+```
+npm test                  →  34 passed (5 files)
+  - commit hash matches Settlement.computeCommitHash (vectors from Python eth_abi)
+  - SDR price mirror matches the Phase 1 worked values; band and smoothing
+  - units: paise / Wh conversions, payment floor, readable revert messages
+  - Zod schemas match backend participant validation; price stays in ₹3–₹8
+  - components: Stepper, loading / empty / error states, TxStatus, TradesTable units,
+    ReputationGauge, CountdownRing (screen-reader text), keyboard radio group
+
+npx playwright test       →  19 passed
+  - trade-flow: connect demo wallet → Sign-In With Ethereum → profile → faucet →
+    stake + register on chain → commit sell on chain → automatic reveal → trade appears
+  - responsive: 6 pages × 375 / 768 / 1440 px — no horizontal scroll, no console errors
+    (screenshots in frontend/test-results/screens/)
+
+npx tsc --noEmit          →  no errors
+next lint                 →  No ESLint warnings or errors
+next build                →  ✓ 12 routes compiled
+```
+
+Run it:
+
+```bash
+cd contracts && npx hardhat node                                       # terminal 1
+cd contracts && npx hardhat run scripts/deploy.ts --network localhost  # once
+cd frontend && npm run dev:mock                                        # terminal 2: mock Phase 7 API on :8001
+cd frontend && npm run dev:with-mock                                   # terminal 3: http://localhost:3000
+```
+
+No MetaMask needed: on the local chain the Connect dialog offers three demo accounts.
+
+Built:
+- Design system: `frontend/src/app/globals.css` (light / dark tokens), `tailwind.config.ts` (8 px scale),
+  `src/components/ui/*` (button, card, field, badge, dialog, tooltip, stepper, skeleton, data states)
+- Shell: `src/components/layout/*` — sidebar (desktop), bottom tabs (mobile), theme toggle, wallet button
+- Plumbing: `src/lib/{api/client,api/types,auth,siwe,ws,queries,tx,chain,contracts,wagmi}.ts`
+- Pages: `/` landing, `/onboarding`, `/dashboard`, `/trade`, `/status`; placeholders for the Phase 9 pages
+- Mock Phase 7 API: `frontend/mock/server.mjs`
+- Tests: `src/**/*.test.ts(x)`, `e2e/trade-flow.spec.ts`, `e2e/responsive.spec.ts`
+
+**When Phase 7 lands:** run `make gen-api`, reconcile `frontend/src/lib/api/types.ts`, and set
+`NEXT_PUBLIC_API_URL` to the real backend. The response fields the UI expects are listed in
+`docs/DECISIONS.md` (Phase 8, item 1). Item 2 there is a timing issue the Phase 7 clock worker needs to handle.
 ## Phase 7 Smoke Test Results
 
 ```
