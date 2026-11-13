@@ -21,6 +21,8 @@ class MarketParams:
     rho_min: float = 0.3
     r_cap: float = 0.9
     beta: float = 25.0  # <= 5% of (p_ret - p_fit) = 25.0 paise
+    match_lambda: float = 1.0  # proportional-share soft penalty weight
+    dt_hours: float = 0.25  # interval length for kWh→kW conversion
 
     # Reputation scoring weights: (w_del, w_rev, w_hon, w_col)
     w_del: float = 0.45

@@ -23,6 +23,8 @@ class Position:
     qty_kwh: float
     limit_price: float
     reputation: float
+    node_id: str = "n0"
+    min_seller_reputation: float = 0.0
 
 
 @dataclass(frozen=True)
