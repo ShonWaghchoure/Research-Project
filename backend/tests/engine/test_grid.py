@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.engine.grid import (
     build_pi_matrix,
     default_13_node_feeder,

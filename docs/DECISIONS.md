@@ -143,3 +143,55 @@ implemented exactly; the items below are the gaps and how they were filled.
     1.9.3, which `requirements.txt` does not pin); `cvxpy` is missing from `requirements.txt`; the
     200-participant clearing benchmark takes ~18 s locally; `tests/engine/test_grid.py` has an
     unused import (ruff F401).
+## Phase 2: Matching and Clearing Engine
+
+1. **QP formulation (vectorized cvxpy)**:
+   - Decision variables are a flat non-negative vector over pre-filtered eligible pairs only (not a dense buyer×seller matrix).
+   - Eligibility: `a_j <= p_ref <= b_i`, both reputations `>= rho_min`, and `R_j >= r_min_i`.
+   - Objective: surplus `(b_i - a_j) + beta * min(R_j, R_cap)` minus `match_lambda * ||y - s||^2` on the long side (sellers if `SDR > 1`, else buyers).
+   - Solvers tried in order: Clarabel → OSQP → SCS.
+
+2. **Grid flow model**:
+   - Peer trade `x_ij` contributes `pi[line][(buyer, seller)] * x_ij` along the unique radial path seller → buyer.
+   - Unmatched buy volume imports from the root (`root → buyer`); unmatched sell volume exports to the root (`seller → root`).
+   - Line constraint: `|peer_flow + grid_residual| / dt <= capacity_kw` with `dt = 0.25 h`.
+   - Consequence: zero capacity on the path from a node to the root makes any positive offer at that node infeasible (even grid-only residuals); the matcher then returns no peer trades.
+
+3. **Default feeder**:
+   - 13-node radial tree (`n0` root/transformer + 12 downstream buses, 12 lines). Fixture helper `default_13_node_feeder`.
+
+4. **Integerization**:
+   - Continuous kWh trades are floored to Wh, then a largest-remainder pass awards at most +1 Wh per trade while respecting per-participant quantity caps.
+   - After awarding remainders, line loadings are rechecked; if any line exceeds capacity, remainders are stripped in reverse award order until feasible.
+
+5. **Hashing**:
+   - `canonical_json`: sorted keys, no spaces.
+   - `input_root`: Merkle root (keccak256 pairwise, odd-duplicate) over sorted revealed position records.
+   - `result_hash`: keccak256 of canonical JSON `{p_ref, trades[]}` with trades sorted by `(buyer_id, seller_id, qty_wh, price)`.
+
+6. **EV helpers** (`ev.py`):
+   - Buy limit `b_i = p_fit + (p_ret - p_fit) * u_i` with `u_i = clip(E_need / (P_max * T_left), 0, 1)`.
+   - V2G sell qty `max(0, SOC - E_target)` only when `v2g=True`.
+
+## Phase 5: Smart Contracts
+
+1. **Units**:
+   - Energy `uint64` Wh; price `uint32` paise/kWh; reputation `uint16` basis points.
+   - MockINR has 2 decimals (1 token unit = 1 paisa).
+   - Payment = `qtyWh * pricePaise / 1000` (floor).
+
+2. **Deploy order**:
+   - MockINR → Registry → ReputationAnchor → Settlement → (Ping retained for Phase 0).
+   - `Registry.SETTLEMENT_ROLE` granted to Settlement after deploy.
+   - Addresses + ABIs written to `contracts/deployments/<network>.json`.
+
+3. **Settlement design**:
+   - Commit-reveal: on-chain commit only; reveal is off-chain (backend Phase 7).
+   - Internal escrow via `deposit` / `withdrawEscrow`; `settleBatch` moves escrow buyer→seller at `pRef` only.
+   - Shortfall leaf = `keccak256(abi.encode(intervalId, participant, shortfallWh))`; slash total (compensation + 10% penalty) to Settlement, then transfer compensation to buyer.
+
+4. **Registry withdrawals**:
+   - `requestWithdraw()` (no amount) queues all stake above `minStake` (or all stake if unregistered), then `withdraw()` after cooldown.
+
+5. **ReputationAnchor**:
+   - Leaf = `keccak256(abi.encodePacked(participant, scoreBp, evidenceCount))`; OZ MerkleProof (commutative pair hashing).
