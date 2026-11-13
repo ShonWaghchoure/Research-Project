@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict
 
 import redis
 import structlog
@@ -13,11 +14,12 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from web3 import Web3
 
-from app.api import admin, auth, participants
+from app.api import admin, auth, intervals, participants, positions, reputation_api, trades, ws
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import setup_logging
 from app.db.session import engine
+from app.workers.scheduler import start_scheduler, stop_scheduler
 
 setup_logging()
 logger = structlog.get_logger("ft_backend")
@@ -33,11 +35,21 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    start_scheduler()
+    try:
+        yield
+    finally:
+        stop_scheduler()
+
+
 app = FastAPI(
     title="Fair and Trustworthy P2P Energy Trading API",
-    version="0.6.0",
+    version="0.7.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
@@ -55,6 +67,11 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(participants.router)
 app.include_router(admin.router)
+app.include_router(intervals.router)
+app.include_router(positions.router)
+app.include_router(trades.router)
+app.include_router(reputation_api.router)
+app.include_router(ws.router)
 
 
 @app.middleware("http")
@@ -123,4 +140,6 @@ def health_check(request: Request) -> Dict[str, Any]:
         "chain_rpc": rpc_status,
         "block_number": block_number,
         "chain_id": settings.CHAIN_ID,
+        "demo_mode": settings.DEMO_MODE,
+        "interval_seconds": settings.INTERVAL_SECONDS,
     }

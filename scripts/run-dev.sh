@@ -15,10 +15,15 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM EXIT
 
+# Demo defaults (overridable by caller / .env)
+export DEMO_MODE="${DEMO_MODE:-1}"
+export INTERVAL_SECONDS="${INTERVAL_SECONDS:-45}"
+export DEMO_BOT_COUNT="${DEMO_BOT_COUNT:-10}"
+
 # Start backend
 (cd "$ROOT_DIR/backend" && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000) &
 BACKEND_PID=$!
-echo "Backend running on PID $BACKEND_PID (http://localhost:8000)"
+echo "Backend running on PID $BACKEND_PID (http://localhost:8000) DEMO_MODE=$DEMO_MODE INTERVAL_SECONDS=$INTERVAL_SECONDS"
 
 # Start frontend
 (cd "$ROOT_DIR/frontend" && exec npm run dev) &

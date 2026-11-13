@@ -195,6 +195,7 @@ class Position(Base):
     limit_price_paise: Mapped[int] = mapped_column(Integer, nullable=False)
     commit_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True)
     salt: Mapped[Optional[str]] = mapped_column(String(66), nullable=True)
+    deadline: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     revealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

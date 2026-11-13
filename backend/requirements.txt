@@ -90,3 +90,5 @@ PyJWT==2.15.1
 slowapi==0.1.10
 structlog==26.1.0
 limits==5.8.0
+# Phase 7: market lifecycle scheduler
+APScheduler==3.11.3

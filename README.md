@@ -19,8 +19,8 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **4** | Simulator and baselines | ✅ **Done** |
 | **5** | Smart contracts | ✅ **Done** |
 | **6** | Backend foundation | ✅ **Done** |
-| 7 | Market lifecycle | 🟨 In progress (teammate) |
-| **8** | Frontend foundation | ✅ **Done** (against a Phase 7 mock; see below) |
+| **7** | Market lifecycle | ✅ **Done** |
+| 8 | Frontend foundation | ⬜ Pending |
 | 9 | Frontend market views | ⬜ Pending |
 | 10 | Attack lab, audit, admin | ⬜ Pending |
 | 11 | Experiments | ⬜ Pending |
@@ -391,6 +391,38 @@ Built:
 **When Phase 7 lands:** run `make gen-api`, reconcile `frontend/src/lib/api/types.ts`, and set
 `NEXT_PUBLIC_API_URL` to the real backend. The response fields the UI expects are listed in
 `docs/DECISIONS.md` (Phase 8, item 1). Item 2 there is a timing issue the Phase 7 clock worker needs to handle.
+## Phase 7 Smoke Test Results
+
+```
+DEMO_MODE=1 INTERVAL_SECONDS=45 DEMO_BOT_COUNT=10 CHAIN_CONFIRMATIONS=1 \
+  pytest tests/integration/test_phase7_lifecycle.py -v -s
+  → 1 passed in ~208 s
+  → 3 consecutive intervals opened → cleared (25 trades each) → posted →
+    metered → reputation anchored
+  → on-chain result hash matches DB; lazy bot stake slashed; Merkle
+    verifyScore(true) against ReputationAnchor
+
+Restart / idempotency
+  Re-run poster + meter + reputation on metered intervals
+  → confirmed settle:* txs unchanged; trade rows unchanged; result hash stable
+
+Demo mode (make dev / uvicorn + scheduler)
+  DEMO_MODE=1 INTERVAL_SECONDS=45 → scheduler opens intervals; bots fund,
+  commit, reveal through the same chain client paths as humans
+  GET /intervals/current → live OPEN/COMMIT/… state
+```
+
+Built:
+- `backend/app/chain/{client,commit,deployments,merkle}.py` — web3 client with
+  nonce manager, idempotent `transactions` rows, ABI/address load from
+  `contracts/deployments/<network>.json`
+- `backend/app/workers/{clock,clearing,poster,meter,reputation,listener,bots,
+  scheduler,pubsub,phase_timing,feeder_load}.py` — full interval FSM + demo bots
+- `backend/app/api/{intervals,positions,trades,reputation_api,ws}.py` — market API
+  and Redis-backed WebSocket `/ws`
+- `backend/alembic/versions/a7c1d2e3f405_phase7_position_deadline.py`
+
+Tests: `backend/tests/integration/test_phase7_lifecycle.py`
 
 ---
 
@@ -406,8 +438,12 @@ See [`.env.example`](.env.example) for all required variables:
 | `CHAIN_ID` | Chain ID (31337 for local Hardhat) |
 | `OPERATOR_PRIVATE_KEY` | Operator wallet private key (testnet only) |
 | `JWT_SECRET` | Secret for signing JWTs |
-| `INTERVAL_SECONDS` | Market interval length in seconds |
+| `INTERVAL_SECONDS` | Market interval length in seconds (demo default 45) |
+| `DEMO_MODE` | Enable demo bots + automatic interval workers (`1`/`0`) |
+| `DEMO_BOT_COUNT` | Number of Hardhat demo bot wallets (default 10) |
+| `CHAIN_CONFIRMATIONS` | Receipt confirmations before marking txs confirmed |
 | `PING_CONTRACT_ADDRESS` | Deployed Ping contract address |
+| `MOCK_INR_ADDRESS` / `REGISTRY_ADDRESS` / `SETTLEMENT_ADDRESS` / `REPUTATION_ANCHOR_ADDRESS` | Deployed market contracts |
 
 ---
 
