@@ -42,63 +42,6 @@ def _wh_to_kwh(qty_wh: int) -> float:
     return qty_wh / 1000.0
 
 
-def _largest_remainder_repair(
-    float_trades: Sequence[MatchTrade],
-    positions: Sequence[Position],
-    p_ref: float,
-) -> List[ClearedTrade]:
-    """Round each trade down to Wh, then allocate remainders without violating caps."""
-    buyers = {p.participant_id: p for p in positions if p.side == "buy"}
-    sellers = {p.participant_id: p for p in positions if p.side == "sell"}
-
-    buyer_cap = {pid: _kwh_to_wh_floor(p.qty_kwh) for pid, p in buyers.items()}
-    seller_cap = {pid: _kwh_to_wh_floor(p.qty_kwh) for pid, p in sellers.items()}
-
-    # Initial floor
-    floors: List[tuple[MatchTrade, int, float]] = []
-    for t in float_trades:
-        wh_exact = t.qty_kwh * 1000.0
-        floor = int(wh_exact)
-        frac = wh_exact - floor
-        floors.append((t, floor, frac))
-
-    buyer_used = {pid: 0 for pid in buyer_cap}
-    seller_used = {pid: 0 for pid in seller_cap}
-    qty = [f for _, f, _ in floors]
-    for i, (t, floor, _) in enumerate(floors):
-        buyer_used[t.buyer_id] = buyer_used.get(t.buyer_id, 0) + floor
-        seller_used[t.seller_id] = seller_used.get(t.seller_id, 0) + floor
-        qty[i] = floor
-
-    # Largest remainder: try to add 1 Wh in frac order while caps allow
-    order = sorted(range(len(floors)), key=lambda i: floors[i][2], reverse=True)
-    for i in order:
-        t = floors[i][0]
-        if buyer_used[t.buyer_id] >= buyer_cap.get(t.buyer_id, 0):
-            continue
-        if seller_used[t.seller_id] >= seller_cap.get(t.seller_id, 0):
-            continue
-        # Only award remainder if fractional part was > 0
-        if floors[i][2] <= 0:
-            continue
-        qty[i] += 1
-        buyer_used[t.buyer_id] += 1
-        seller_used[t.seller_id] += 1
-
-    cleared: List[ClearedTrade] = []
-    for i, (t, _, _) in enumerate(floors):
-        if qty[i] > 0:
-            cleared.append(
-                ClearedTrade(
-                    buyer_id=t.buyer_id,
-                    seller_id=t.seller_id,
-                    qty_wh=qty[i],
-                    price=p_ref,
-                )
-            )
-    return cleared
-
-
 def _recompute_line_loadings(
     trades: Sequence[ClearedTrade],
     positions: Sequence[Position],
@@ -150,6 +93,102 @@ def _recompute_line_loadings(
     return loadings
 
 
+def _trades_from_qty(
+    floors: Sequence[tuple[MatchTrade, int, float]],
+    qty: Sequence[int],
+    p_ref: float,
+) -> List[ClearedTrade]:
+    cleared: List[ClearedTrade] = []
+    for i, (t, _, _) in enumerate(floors):
+        if qty[i] > 0:
+            cleared.append(
+                ClearedTrade(
+                    buyer_id=t.buyer_id,
+                    seller_id=t.seller_id,
+                    qty_wh=qty[i],
+                    price=p_ref,
+                )
+            )
+    return cleared
+
+
+def _line_caps_ok(
+    trades: Sequence[ClearedTrade],
+    positions: Sequence[Position],
+    feeder: Feeder,
+    params: MarketParams,
+) -> bool:
+    loadings = _recompute_line_loadings(trades, positions, feeder, params)
+    for line in feeder.lines:
+        if abs(loadings.get(line.id, 0.0)) > line.capacity_kw + 1e-6:
+            return False
+    return True
+
+
+def _largest_remainder_repair(
+    float_trades: Sequence[MatchTrade],
+    positions: Sequence[Position],
+    p_ref: float,
+    feeder: Feeder,
+    params: MarketParams,
+) -> List[ClearedTrade]:
+    """Round each trade down to Wh, then allocate remainders without violating caps.
+
+    Remainders are awarded largest-fraction first only when quantity caps and
+    feeder line capacities both stay satisfied.
+    """
+    buyers = {p.participant_id: p for p in positions if p.side == "buy"}
+    sellers = {p.participant_id: p for p in positions if p.side == "sell"}
+
+    buyer_cap = {pid: _kwh_to_wh_floor(p.qty_kwh) for pid, p in buyers.items()}
+    seller_cap = {pid: _kwh_to_wh_floor(p.qty_kwh) for pid, p in sellers.items()}
+
+    floors: List[tuple[MatchTrade, int, float]] = []
+    for t in float_trades:
+        wh_exact = t.qty_kwh * 1000.0
+        floor = int(wh_exact)
+        frac = wh_exact - floor
+        floors.append((t, floor, frac))
+
+    buyer_used = {pid: 0 for pid in buyer_cap}
+    seller_used = {pid: 0 for pid in seller_cap}
+    qty = [f for _, f, _ in floors]
+    for i, (t, floor, _) in enumerate(floors):
+        buyer_used[t.buyer_id] = buyer_used.get(t.buyer_id, 0) + floor
+        seller_used[t.seller_id] = seller_used.get(t.seller_id, 0) + floor
+        qty[i] = floor
+
+    # Award remainders by largest fractional part while quantity caps allow.
+    awarded: List[int] = []
+    order = sorted(range(len(floors)), key=lambda i: floors[i][2], reverse=True)
+    for i in order:
+        t = floors[i][0]
+        if floors[i][2] <= 0:
+            continue
+        if buyer_used[t.buyer_id] >= buyer_cap.get(t.buyer_id, 0):
+            continue
+        if seller_used[t.seller_id] >= seller_cap.get(t.seller_id, 0):
+            continue
+        qty[i] += 1
+        buyer_used[t.buyer_id] += 1
+        seller_used[t.seller_id] += 1
+        awarded.append(i)
+
+    # If line capacities are violated, strip remainders in reverse award order.
+    candidate = _trades_from_qty(floors, qty, p_ref)
+    if not _line_caps_ok(candidate, positions, feeder, params):
+        for i in reversed(awarded):
+            t = floors[i][0]
+            qty[i] -= 1
+            buyer_used[t.buyer_id] -= 1
+            seller_used[t.seller_id] -= 1
+            candidate = _trades_from_qty(floors, qty, p_ref)
+            if _line_caps_ok(candidate, positions, feeder, params):
+                break
+
+    return _trades_from_qty(floors, qty, p_ref)
+
+
 def clear_interval(
     positions: Sequence[Position],
     feeder: Feeder,
@@ -159,7 +198,9 @@ def clear_interval(
     """Price → match → integerize → hash."""
     price = compute_reference_price(positions, prev_p_ref, params)
     matched = match_orders(positions, feeder, price.p_ref, price.sdr, params)
-    cleared = _largest_remainder_repair(matched.trades, positions, price.p_ref)
+    cleared = _largest_remainder_repair(
+        matched.trades, positions, price.p_ref, feeder, params
+    )
 
     buyers = {p.participant_id: p for p in positions if p.side == "buy"}
     sellers = {p.participant_id: p for p in positions if p.side == "sell"}
