@@ -14,8 +14,11 @@ dev:
 	@sleep 3
 	@echo "📦  Deploying contracts to localhost…"
 	cd $(CONTRACTS_DIR) && npx hardhat run scripts/deploy.ts --network localhost
-	@echo "🚀  Starting backend + frontend…"
-	bash scripts/run-dev.sh
+	@echo "🗄  Migrating + seeding DB…"
+	cd $(BACKEND_DIR) && .venv/bin/alembic upgrade head
+	cd $(BACKEND_DIR) && .venv/bin/python -m app.db.seed
+	@echo "🚀  Starting backend + frontend (demo mode)…"
+	DEMO_MODE=1 INTERVAL_SECONDS=45 DEMO_BOT_COUNT=10 bash scripts/run-dev.sh
 
 # ─── test ───────────────────────────────────────────────────────────────────
 test:

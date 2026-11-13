@@ -31,5 +31,22 @@ services:
       timeout: 3s
       retries: 5
 
+  # Phase 7 integration smoke (use with: docker compose --profile test up -d)
+  hardhat:
+    profiles: ["test"]
+    image: node:20-bookworm
+    container_name: ft-hardhat
+    working_dir: /contracts
+    volumes:
+      - ./contracts:/contracts
+    command: ["bash", "-lc", "npm ci && npx hardhat node --hostname 0.0.0.0 --port 8545"]
+    ports:
+      - "8545:8545"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'eth_chainId',params:[],id:1})}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   postgres_data:

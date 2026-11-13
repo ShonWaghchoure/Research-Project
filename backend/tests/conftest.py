@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
+# Prevent market scheduler from starting during unit/API tests.
+os.environ["TESTING"] = "1"
+
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
