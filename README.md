@@ -18,7 +18,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **3** | Reputation, defenses, fairness | ✅ **Done** |
 | **4** | Simulator and baselines | ✅ **Done** |
 | **5** | Smart contracts | ✅ **Done** |
-| 6 | Backend foundation | ⬜ Pending |
+| **6** | Backend foundation | ✅ **Done** |
 | 7 | Market lifecycle | ⬜ Pending |
 | 8 | Frontend foundation | ⬜ Pending |
 | 9 | Frontend market views | ⬜ Pending |
@@ -82,7 +82,8 @@ fair-and-trustworthy/
 make dev        # docker up → hardhat node → deploy contracts → backend → frontend
 make test       # contracts (hardhat) + backend (pytest) + frontend (next build)
 make lint       # ruff + mypy + next lint
-make reset-db   # wipe volumes, re-migrate
+make reset-db   # wipe volumes, re-migrate, seed demo participants
+make gen-api    # OpenAPI → frontend/src/api/schema.d.ts
 ```
 
 ---
@@ -297,6 +298,46 @@ Built:
 - `contracts/scripts/deploy.ts` — deploy order + role wiring + JSON export
 
 Tests: `contracts/test/{MockINR,Registry,Settlement,ReputationAnchor,Scenarios,Ping}.ts`
+
+---
+
+## Phase 6 Smoke Test Results
+
+```
+pytest -v
+  134 passed (~42s)
+  - api: SIWE nonce/verify JWT, role gates, participant create/patch/validation,
+    admin config GET/PUT + audit_log
+  - engine + reputation suites still green
+  - health: postgres/redis/chain probes
+
+ruff check .              →  All checks passed
+mypy app                  →  Success: no issues found in 41 source files
+
+Acceptance
+  python scripts/siwe_login.py --account-index 1
+    → ok:true, JWT issued, GET /me returns Hardhat demo participant
+  Non-admin GET /admin/config
+    → HTTP 403 {"detail":"insufficient role"}
+  Admin GET /admin/config
+    → HTTP 200 (MarketParams keys from config table)
+  make reset-db
+    → migrate + seed: 13 feeder_nodes, 12 lines, 20 users, 20 participants, 24 config
+      roles: 1 admin, 1 operator, 18 participant
+  make gen-api
+    → frontend/src/api/schema.d.ts (openapi-typescript 7.13.0)
+```
+
+Built:
+- `backend/app/db/models.py` — SQLAlchemy 2 models (users → audit_log / transactions)
+- `backend/alembic/versions/364439bcf300_phase6_backend_foundation.py`
+- `backend/app/api/{auth,participants,admin}.py` — SIWE JWT, /me, profiles, config + audit
+- `backend/app/core/{security,config_store,limiter,logging}.py`
+- `backend/app/db/seed.py` — feeder fixture + 20 Hardhat wallets + default config
+- `backend/scripts/siwe_login.py`, `backend/scripts/gen_ts_client.sh`
+- `frontend/src/api/schema.d.ts` — generated OpenAPI types
+
+Tests: `backend/tests/api/test_{auth,participants,admin_config}.py`
 
 ---
 

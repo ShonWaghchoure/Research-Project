@@ -1,26 +1,49 @@
-import logging
+from __future__ import annotations
+
 from typing import Any, Dict
 
 import redis
-from fastapi import FastAPI
+import structlog
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
+from starlette.middleware.base import BaseHTTPMiddleware
 from web3 import Web3
 
+from app.api import admin, auth, participants
 from app.core.config import settings
+from app.core.limiter import limiter
+from app.core.logging import setup_logging
 from app.db.session import engine
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ft_backend")
+setup_logging()
+logger = structlog.get_logger("ft_backend")
+
+MAX_REQUEST_BYTES = 1_048_576  # 1 MiB
+
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_REQUEST_BYTES:
+            return Response("request body too large", status_code=413)
+        return await call_next(request)
+
 
 app = FastAPI(
     title="Fair and Trustworthy P2P Energy Trading API",
-    version="0.1.0",
+    version="0.6.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
-# Enable CORS for frontend development
+app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,20 +52,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
+app.include_router(participants.router)
+app.include_router(admin.router)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-def]
+    response = await call_next(request)
+    logger.info(
+        "request",
+        method=request.method,
+        path=request.url.path,
+        status=response.status_code,
+        client=request.client.host if request.client else None,
+    )
+    return response
+
 
 @app.get("/health")
-def health_check() -> Dict[str, Any]:
-    # 1. PostgreSQL ping
+@limiter.limit("60/minute")
+def health_check(request: Request) -> Dict[str, Any]:
     postgres_status = "error"
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
             postgres_status = "ok"
     except Exception as exc:
-        logger.warning("Postgres ping failed: %s", exc)
+        logger.warning("postgres_ping_failed", error=str(exc))
         postgres_status = f"unreachable: {exc}"
 
-    # 2. Redis ping
     redis_status = "error"
     try:
         r = redis.Redis.from_url(
@@ -54,10 +93,9 @@ def health_check() -> Dict[str, Any]:
             redis_status = "ok"
         r.close()
     except Exception as exc:
-        logger.warning("Redis ping failed: %s", exc)
+        logger.warning("redis_ping_failed", error=str(exc))
         redis_status = f"unreachable: {exc}"
 
-    # 3. Block number from CHAIN_RPC_URL via web3.py
     block_number = None
     rpc_status = "error"
     try:
@@ -68,7 +106,7 @@ def health_check() -> Dict[str, Any]:
         else:
             rpc_status = "disconnected"
     except Exception as exc:
-        logger.warning("RPC block_number query failed: %s", exc)
+        logger.warning("rpc_ping_failed", error=str(exc))
         rpc_status = f"unreachable: {exc}"
 
     is_all_ok = (

@@ -1,9 +1,8 @@
-.PHONY: dev test lint reset-db
+.PHONY: dev test lint reset-db gen-api
 
 BACKEND_DIR  := backend
 FRONTEND_DIR := frontend
 CONTRACTS_DIR := contracts
-VENV         := $(BACKEND_DIR)/.venv/bin
 
 # ─── dev ────────────────────────────────────────────────────────────────────
 dev:
@@ -23,16 +22,16 @@ test:
 	@echo "── Contracts ──"
 	cd $(CONTRACTS_DIR) && npx hardhat test
 	@echo "── Backend ──"
-	cd $(BACKEND_DIR) && $(VENV)/pytest -v
+	cd $(BACKEND_DIR) && .venv/bin/pytest -v
 	@echo "── Frontend ──"
 	cd $(FRONTEND_DIR) && npm run build
 
 # ─── lint ───────────────────────────────────────────────────────────────────
 lint:
 	@echo "── Ruff ──"
-	cd $(BACKEND_DIR) && $(VENV)/ruff check .
+	cd $(BACKEND_DIR) && .venv/bin/ruff check .
 	@echo "── Mypy ──"
-	cd $(BACKEND_DIR) && $(VENV)/mypy app
+	cd $(BACKEND_DIR) && .venv/bin/mypy app
 	@echo "── Next.js lint ──"
 	cd $(FRONTEND_DIR) && npm run lint
 
@@ -42,5 +41,10 @@ reset-db:
 	docker compose up -d postgres redis
 	@echo "⏳  Waiting for postgres…"
 	@sleep 4
-	cd $(BACKEND_DIR) && $(VENV)/alembic upgrade head
-	@echo "✅  DB reset and migrated."
+	cd $(BACKEND_DIR) && .venv/bin/alembic upgrade head
+	cd $(BACKEND_DIR) && .venv/bin/python -m app.db.seed
+	@echo "✅  DB reset, migrated, and seeded."
+
+# ─── OpenAPI → TypeScript client ────────────────────────────────────────────
+gen-api:
+	bash $(BACKEND_DIR)/scripts/gen_ts_client.sh
