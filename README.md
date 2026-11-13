@@ -17,7 +17,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **2** | Matching and clearing engine | ✅ **Done** |
 | 3 | Reputation, defenses, fairness | ⬜ Pending |
 | 4 | Simulator and baselines | ⬜ Pending |
-| 5 | Smart contracts | ⬜ Pending |
+| **5** | Smart contracts | ✅ **Done** |
 | 6 | Backend foundation | ⬜ Pending |
 | 7 | Market lifecycle | ⬜ Pending |
 | 8 | Frontend foundation | ⬜ Pending |
@@ -178,6 +178,39 @@ Built:
 - `backend/app/engine/ev.py` — urgency limit price + V2G sell qty
 
 Tests: `backend/tests/engine/test_{grid,matching via clearing,clearing,hashing,ev}.py`
+
+---
+
+## Phase 5 Smoke Test Results
+
+```
+npx hardhat test
+  26 passed
+  - MockINR: 2 decimals, daily faucet
+  - Registry: stake/register uniqueness, cooldown withdraw,
+    slash-only-by-settlement, operator suspend, admin params
+  - Settlement: open/commit/deposit/postClearing/settleBatch,
+    escrow shortfall, never-reveal, double-settle, pause, payment floor
+  - ReputationAnchor: postRoot + Merkle verifyScore
+  - Scenarios: full 10-participant interval + settle + reputation root
+  - Ping (Phase 0) still green
+
+npx hardhat coverage     →  stmts 100% / lines 100%  (branch ~68%; >90% stmts/lines)
+REPORT_GAS=true hardhat test → gas report OK (settleBatch avg ~161k)
+npx hardhat run scripts/deploy.ts --network hardhat
+  → writes contracts/deployments/localhost.json
+    (MockINR, Registry, ReputationAnchor, Settlement, Ping)
+Slither                 → not available (install needs Rust/cbor2 wheel)
+```
+
+Built:
+- `contracts/contracts/MockINR.sol`
+- `contracts/contracts/Registry.sol`
+- `contracts/contracts/Settlement.sol`
+- `contracts/contracts/ReputationAnchor.sol`
+- `contracts/scripts/deploy.ts` — deploy order + role wiring + JSON export
+
+Tests: `contracts/test/{MockINR,Registry,Settlement,ReputationAnchor,Scenarios,Ping}.ts`
 
 ---
 

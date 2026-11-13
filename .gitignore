@@ -49,6 +49,9 @@ cache/
 artifacts/
 typechain/
 typechain-types/
+coverage/
+coverage.json
+gasReporterOutput.json
 
 # OS
 .DS_Store

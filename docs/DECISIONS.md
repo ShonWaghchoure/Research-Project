@@ -75,3 +75,26 @@
 6. **EV helpers** (`ev.py`):
    - Buy limit `b_i = p_fit + (p_ret - p_fit) * u_i` with `u_i = clip(E_need / (P_max * T_left), 0, 1)`.
    - V2G sell qty `max(0, SOC - E_target)` only when `v2g=True`.
+
+## Phase 5: Smart Contracts
+
+1. **Units**:
+   - Energy `uint64` Wh; price `uint32` paise/kWh; reputation `uint16` basis points.
+   - MockINR has 2 decimals (1 token unit = 1 paisa).
+   - Payment = `qtyWh * pricePaise / 1000` (floor).
+
+2. **Deploy order**:
+   - MockINR → Registry → ReputationAnchor → Settlement → (Ping retained for Phase 0).
+   - `Registry.SETTLEMENT_ROLE` granted to Settlement after deploy.
+   - Addresses + ABIs written to `contracts/deployments/<network>.json`.
+
+3. **Settlement design**:
+   - Commit-reveal: on-chain commit only; reveal is off-chain (backend Phase 7).
+   - Internal escrow via `deposit` / `withdrawEscrow`; `settleBatch` moves escrow buyer→seller at `pRef` only.
+   - Shortfall leaf = `keccak256(abi.encode(intervalId, participant, shortfallWh))`; slash total (compensation + 10% penalty) to Settlement, then transfer compensation to buyer.
+
+4. **Registry withdrawals**:
+   - `requestWithdraw()` (no amount) queues all stake above `minStake` (or all stake if unregistered), then `withdraw()` after cooldown.
+
+5. **ReputationAnchor**:
+   - Leaf = `keccak256(abi.encodePacked(participant, scoreBp, evidenceCount))`; OZ MerkleProof (commutative pair hashing).
