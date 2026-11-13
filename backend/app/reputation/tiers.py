@@ -8,9 +8,10 @@ Spec tiers (GEMINI.md Phase 3):
     Q_max = Q_base * (0.2 + 0.8 * R)
 
 Additions (docs/DECISIONS.md, Phase 3):
-  * Newcomer grace: the prior gives R = 0.098 < 0.15, which would suspend every newcomer, and a
-    participant that cannot trade can never earn evidence. A newcomer (evidence_count < 20) whose
-    R has not fallen below the prior's R is therefore Probation, not Suspended.
+  * Uncertainty never suspends: the prior gives R = 0.098 < 0.15, which would suspend every
+    newcomer, and idle forgetting widens sigma and lowers R for anyone who stops trading. A
+    participant that cannot trade can never earn evidence, so R < 0.15 only suspends when the
+    Beta mean is also below the prior mean (net-negative evidence). Otherwise it is Probation.
   * Probation may trade P2P under the volume cap: ``matching_reputation`` lifts it to rho_min so
     the Phase 2 matching gate admits it. Only Suspended participants are excluded.
   * Hysteresis: a participant only drops a tier when R falls ``hysteresis`` below the boundary,
@@ -22,7 +23,7 @@ from __future__ import annotations
 from enum import Enum
 
 from app.reputation.params import DEFAULT_REPUTATION_PARAMS, ReputationParams
-from app.reputation.score import BetaState, Evidence, initial_state, reputation, update
+from app.reputation.score import BetaState, Evidence, initial_state, mean, reputation, update
 
 
 class Tier(str, Enum):
@@ -35,9 +36,10 @@ class Tier(str, Enum):
 _RANK = {Tier.SUSPENDED: 0, Tier.PROBATION: 1, Tier.STANDARD: 2, Tier.TRUSTED: 3}
 
 
-def _raw_tier(r: float, count: int, prior_r: float, params: ReputationParams, h: float) -> Tier:
+def _raw_tier(r: float, mu: float, count: int, prior_mu: float, params: ReputationParams, h: float) -> Tier:
     newcomer = count < params.newcomer_evidence
-    if r < params.suspended_below - h and not (newcomer and r >= prior_r - 1e-9):
+    # Uncertainty alone never suspends: a low R needs net-negative evidence (mean below the prior).
+    if r < params.suspended_below - h and mu < prior_mu - 1e-9:
         return Tier.SUSPENDED
     if newcomer or r < params.probation_below - h:
         return Tier.PROBATION
@@ -57,12 +59,13 @@ def classify(
     if high_severity_flag:
         return Tier.SUSPENDED
     r = reputation(state, params)
-    prior_r = reputation(initial_state(params), params)
-    raw = _raw_tier(r, state.evidence_count, prior_r, params, 0.0)
+    mu = mean(state)
+    prior_mu = mean(initial_state(params))
+    raw = _raw_tier(r, mu, state.evidence_count, prior_mu, params, 0.0)
     if prev_tier is None or _RANK[raw] >= _RANK[prev_tier]:
         return raw
     # Downgrade: only if R is below the boundary by more than the hysteresis margin.
-    lenient = _raw_tier(r, state.evidence_count, prior_r, params, params.hysteresis)
+    lenient = _raw_tier(r, mu, state.evidence_count, prior_mu, params, params.hysteresis)
     return lenient if _RANK[lenient] < _RANK[prev_tier] else prev_tier
 
 

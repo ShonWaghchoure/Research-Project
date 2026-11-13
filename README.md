@@ -15,8 +15,8 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **0** | Walking skeleton | ✅ **Done** |
 | **1** | Pricing engine (SDR) | ✅ **Done** |
 | **2** | Matching and clearing engine | ✅ **Done** |
-| 3 | Reputation, defenses, fairness | ⬜ Pending |
-| 4 | Simulator and baselines | ⬜ Pending |
+| **3** | Reputation, defenses, fairness | ✅ **Done** |
+| **4** | Simulator and baselines | ✅ **Done** |
 | **5** | Smart contracts | ✅ **Done** |
 | **6** | Backend foundation | ✅ **Done** |
 | 7 | Market lifecycle | ⬜ Pending |
@@ -179,6 +179,92 @@ Built:
 - `backend/app/engine/ev.py` — urgency limit price + V2G sell qty
 
 Tests: `backend/tests/engine/test_{grid,matching via clearing,clearing,hashing,ev}.py`
+
+---
+
+## Phase 3 Smoke Test Results
+
+```
+pytest tests/reputation/ -v
+  86 passed
+  - score: worked table (0 -> 0.098, 1 -> 0.276, 2 -> 0.400, 5 -> 0.606, 20 -> 0.856, 50 -> 0.936),
+    failure ~3x success, zero-volume adds no evidence, forgetting (Trusted -> lost when
+    delivery stops; old failures fade), reveal-miss penalty, pro-rated partial delivery
+  - tiers: spec tier rules, volume cap, newcomer cold start (Probation, can trade, reaches
+    Trusted in 100 perfect intervals), idle decay never suspends, hysteresis at boundaries
+  - shortfall: hand-computed compensation / penalty / pro-rated payment in integer paise
+  - sybil: wash-trading pair c_i = 1.0, diversified trader c_i = 0.0, 3-member ring caught by
+    Louvain (internal ratio 0.99), IsolationForest outlier, PV plausibility, energy balance
+  - fairness: Jain (1, 0.25), Gini (0, 0.75), HHI, small-actor parity, price impact via
+    pricing.price_impact, reputation mobility, welfare efficiency, report metrics
+  - Hypothesis property tests (R, Jain and Gini always in range; success never lowers R)
+
+ruff check .              →  All checks passed
+mypy app                  →  Success: no issues found
+```
+
+Built:
+- `backend/app/reputation/params.py` — Phase 3 thresholds, read from `core/params.py`
+- `backend/app/reputation/score.py` — Beta reputation with forgetting and lower confidence bound
+- `backend/app/reputation/tiers.py` — tiers, volume cap, hysteresis, `matching_reputation` hand-off
+- `backend/app/reputation/shortfall.py` — compensation, penalty, pro-rated payment (paise)
+- `backend/app/reputation/sybil.py` — collusion (PC/RR), Louvain communities, IsolationForest, false-report checks, flags
+- `backend/app/reputation/fairness.py` — spec metrics plus report metrics (seller satisfaction,
+  bill saving, revenue uplift, surplus split, matching rate, grid trust density, grid-backup frequency)
+
+Tests: `backend/tests/reputation/test_{score,tiers,shortfall,sybil,fairness}.py`
+
+Integration note for Phases 4 and 7: build each `Position` with
+`reputation = matching_reputation(state, tier)` and cap `qty_kwh` at `volume_cap_kwh(...)`.
+Design decisions and sources: `docs/DECISIONS.md` (Phase 3).
+
+---
+
+## Phase 4 Smoke Test Results
+
+```
+python -m app.sim.cli simulate --scenario honest --participants 100 --days 7 --seed 42 --out results/honest_b3
+  → finished in ~43 s; intervals / trades / reputation / flags / fairness / participants CSVs,
+    summary.json, config.json (git commit), timing.csv
+  → buyer bill saving 9.5%, seller revenue uplift 15.2%, 1,728 kWh traded P2P
+  → 0 line violations, 67,200 signed meter readings verified, 0 failed
+Same seed, two 7-day runs  →  all CSVs byte-identical (timing.csv excluded)
+
+python -m app.sim.cli compare --scenario honest --participants 100 --days 1 --seed 42 --out results/cmp
+  mode   buyer bill saving %  seller revenue uplift %  total gain (INR)  line violations
+  B0                    0.00                     0.00              0.00                0
+  B1                    5.10                    14.44            721.92                0
+  B2                    7.50                     3.70            602.42                0
+  B3                    7.35                     4.69            618.47                0
+
+pytest tests/sim/ -v
+  42 passed
+  - models: load shape, clear-sky PV, seeded weather, battery limits,
+    EV reserve + departure-target guard (V2G), signed meter tamper detection
+  - bots and baselines: each behaviour, B1 fixed price, B2 proportional 3:1
+  - runner: identical outputs for the same seed, 100-participant day with no
+    line violations, lazy / non-revealer / ring end with lower reputation,
+    B1-B3 buyer bills below B0, P2P never overloads a tight feeder,
+    every one of the 19 scenarios runs
+
+pytest -v                 →  171 passed    # phases 0-4
+ruff check .              →  All checks passed
+mypy app                  →  Success: no issues found in 33 source files
+```
+
+Built:
+- `backend/app/sim/forecast.py` — household load, solar with cloud forecast vs actual, battery, EV
+- `backend/app/sim/meters.py` — secp256k1-signed meter readings (deterministic keys)
+- `backend/app/sim/bots.py` — honest, lazy, strategic, collusion ring, Sybil, price manipulator,
+  false reporter, defector, non-revealer
+- `backend/app/sim/baselines.py` — B0 grid only, B1 fixed price first-come, B2 SDR + proportional, B3 full system
+- `backend/app/sim/scenarios.py` — 19 scenarios: spec attacks, report S1–S4 / S10, edge-case stress tests
+- `backend/app/sim/runner.py` — interval loop, settlement, reputation, detection every 12 intervals, metrics, CSVs
+- `backend/app/sim/cli.py` — `simulate`, `compare`, `scenarios`
+
+Tests: `backend/tests/sim/test_{models,runner}.py`
+
+List scenarios with `python -m app.sim.cli scenarios`. Design decisions and findings: `docs/DECISIONS.md` (Phase 4).
 
 ---
 

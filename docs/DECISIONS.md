@@ -46,6 +46,36 @@
 5. **`price_impact`**:
    - Returns `p_raw(after) - p_raw(before)` when `delta_kwh` is added to one participant's quantity. Raises `ValueError` if `participant_id` is missing. Uses `prev_p_ref=None` so the metric reflects raw price only.
 
+## Phase 2: Matching and Clearing Engine
+
+1. **QP formulation (vectorized cvxpy)**:
+   - Decision variables are a flat non-negative vector over pre-filtered eligible pairs only (not a dense buyer×seller matrix).
+   - Eligibility: `a_j <= p_ref <= b_i`, both reputations `>= rho_min`, and `R_j >= r_min_i`.
+   - Objective: surplus `(b_i - a_j) + beta * min(R_j, R_cap)` minus `match_lambda * ||y - s||^2` on the long side (sellers if `SDR > 1`, else buyers).
+   - Solvers tried in order: Clarabel → OSQP → SCS.
+
+2. **Grid flow model**:
+   - Peer trade `x_ij` contributes `pi[line][(buyer, seller)] * x_ij` along the unique radial path seller → buyer.
+   - Unmatched buy volume imports from the root (`root → buyer`); unmatched sell volume exports to the root (`seller → root`).
+   - Line constraint: `|peer_flow + grid_residual| / dt <= capacity_kw` with `dt = 0.25 h`.
+   - Consequence: zero capacity on the path from a node to the root makes any positive offer at that node infeasible (even grid-only residuals); the matcher then returns no peer trades.
+
+3. **Default feeder**:
+   - 13-node radial tree (`n0` root/transformer + 12 downstream buses, 12 lines). Fixture helper `default_13_node_feeder`.
+
+4. **Integerization**:
+   - Continuous kWh trades are floored to Wh, then a largest-remainder pass awards at most +1 Wh per trade while respecting per-participant quantity caps.
+   - After awarding remainders, line loadings are rechecked; if any line exceeds capacity, remainders are stripped in reverse award order until feasible.
+
+5. **Hashing**:
+   - `canonical_json`: sorted keys, no spaces.
+   - `input_root`: Merkle root (keccak256 pairwise, odd-duplicate) over sorted revealed position records.
+   - `result_hash`: keccak256 of canonical JSON `{p_ref, trades[]}` with trades sorted by `(buyer_id, seller_id, qty_wh, price)`.
+
+6. **EV helpers** (`ev.py`):
+   - Buy limit `b_i = p_fit + (p_ret - p_fit) * u_i` with `u_i = clip(E_need / (P_max * T_left), 0, 1)`.
+   - V2G sell qty `max(0, SOC - E_target)` only when `v2g=True`.
+
 ## Phase 3: Reputation, Defenses and Fairness
 
 Sources consolidated: GEMINI.md Phase 3 spec, the project report (IIIT-A Research Methodology, 2026),
@@ -60,8 +90,12 @@ implemented exactly; the items below are the gaps and how they were filled.
    tiers would suspend them (R < 0.15) and the Phase 2 matching gate excludes R < rho_min = 0.3, so
    they could never trade, never earn evidence and never recover. The report (section 5.4) requires
    that the cold-start barrier "does not permanently disadvantage genuine new entrants". Decision:
-   - A newcomer (evidence_count < 20) whose R has not fallen below the prior's R is **Probation**,
-     not Suspended. A newcomer who defaults drops below the prior R and loses this grace.
+   - **Uncertainty never suspends**: R < 0.15 only means Suspended when the Beta mean is also
+     below the prior mean (net-negative evidence). Otherwise the participant is Probation. This
+     covers newcomers (R = 0.098 at the prior) and anyone whose R fell only because idle forgetting
+     widened sigma (edge case 10). A newcomer who fully defaults falls below the prior mean and is
+     suspended. (The first version used a newcomer-only grace; the Phase 4 simulator showed that
+     idle decay still suspended newcomers, so the rule was generalised.)
    - Probation may trade P2P under the volume cap Q_max = Q_base*(0.2 + 0.8R).
      `tiers.matching_reputation()` returns max(R, rho_min) for Probation and 0 for Suspended.
    - **Hand-off (Phases 4 and 7)**: when building `engine.pricing.Position`, set
@@ -138,40 +172,106 @@ implemented exactly; the items below are the gaps and how they were filled.
     index, buyer bill saving %, seller revenue uplift %, buyer/seller surplus split, matching rate
     (market resilience), grid trust density, and grid-backup frequency (edge case 14).
 
-17. **Known issues outside Phase 3** (not changed here): `engine/matching.py:234` raises
-    `AttributeError` when a line expression is a plain float (7 clearing tests fail with cvxpy
-    1.9.3, which `requirements.txt` does not pin); `cvxpy` is missing from `requirements.txt`; the
-    200-participant clearing benchmark takes ~18 s locally; `tests/engine/test_grid.py` has an
-    unused import (ruff F401).
-## Phase 2: Matching and Clearing Engine
+17. **Phase 2 issues found while building Phase 3**: the `matching.py` AttributeError, the missing
+    `cvxpy` pin and the unused import in `test_grid.py` were fixed on `main` in the Phase 2
+    hardening commit (ce6db72) and merged into this branch.
 
-1. **QP formulation (vectorized cvxpy)**:
-   - Decision variables are a flat non-negative vector over pre-filtered eligible pairs only (not a dense buyer×seller matrix).
-   - Eligibility: `a_j <= p_ref <= b_i`, both reputations `>= rho_min`, and `R_j >= r_min_i`.
-   - Objective: surplus `(b_i - a_j) + beta * min(R_j, R_cap)` minus `match_lambda * ||y - s||^2` on the long side (sellers if `SDR > 1`, else buyers).
-   - Solvers tried in order: Clarabel → OSQP → SCS.
+## Phase 4: Simulator and Baselines
 
-2. **Grid flow model**:
-   - Peer trade `x_ij` contributes `pi[line][(buyer, seller)] * x_ij` along the unique radial path seller → buyer.
-   - Unmatched buy volume imports from the root (`root → buyer`); unmatched sell volume exports to the root (`seller → root`).
-   - Line constraint: `|peer_flow + grid_residual| / dt <= capacity_kw` with `dt = 0.25 h`.
-   - Consequence: zero capacity on the path from a node to the root makes any positive offer at that node infeasible (even grid-only residuals); the matcher then returns no peer trades.
+Sources consolidated: GEMINI.md Phase 4 spec, the project report (Table 3.2 scenarios, cohorts,
+operational metrics; Nazir et al. [1] proportional allocation and bill-saving comparison), the team
+edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conventions.
 
-3. **Default feeder**:
-   - 13-node radial tree (`n0` root/transformer + 12 downstream buses, 12 lines). Fixture helper `default_13_node_feeder`.
+1. **Time and units**: 96 intervals/day, dt = 0.25 h. Physical models work in kWh; every market
+   boundary is integer Wh; money is paise. Positions are rounded to whole Wh before clearing.
 
-4. **Integerization**:
-   - Continuous kWh trades are floored to Wh, then a largest-remainder pass awards at most +1 Wh per trade while respecting per-participant quantity caps.
-   - After awarding remainders, line loadings are rechecked; if any line exceeds capacity, remainders are stripped in reverse award order until feasible.
+2. **Physical models** (`sim/forecast.py`):
+   - Household load: base + morning (07:30) and evening (20:00) Gaussian peaks, 4-10 kWh/day,
+     lognormal noise (sigma 0.15) between forecast and actual.
+   - PV: clear-sky bell 06:00-18:00 times a shared feeder cloud factor (daily AR level + intra-day
+     AR(1)). Positions use a **persistence forecast** (previous interval's cloud); delivery uses the
+     actual cloud. The gap creates honest weather shortfalls (edge case 16) with no bad actors.
+   - Battery: self-consumption first (charge on surplus, discharge on deficit), 95% one-way efficiency.
+   - EV: overnight sessions; buy limit from `engine.ev` urgency. V2G sales are capped so the SoC
+     never drops below the reserve AND the target stays reachable by departure, projecting the
+     trajectory every interval (edge cases 7, 8). V2G is only offered when the EV needs no charge.
 
-5. **Hashing**:
-   - `canonical_json`: sorted keys, no spaces.
-   - `input_root`: Merkle root (keccak256 pairwise, odd-duplicate) over sorted revealed position records.
-   - `result_hash`: keccak256 of canonical JSON `{p_ref, trades[]}` with trades sorted by `(buyer_id, seller_id, qty_wh, price)`.
+3. **Honest limit prices are near-truthful**: a participant's real alternative is the grid, so any
+   P2P price in [p_fit, p_ret] beats it. Honest sellers ask p_fit + U(0, 10%) of the corridor and
+   buyers bid p_ret - U(0, 10%). Wider margins (tried: 5-35%) priced honest participants out
+   whenever the SDR price moved toward a bound, which made B1 look better than B2/B3 for reasons
+   unrelated to the mechanism.
 
-6. **EV helpers** (`ev.py`):
-   - Buy limit `b_i = p_fit + (p_ret - p_fit) * u_i` with `u_i = clip(E_need / (P_max * T_left), 0, 1)`.
-   - V2G sell qty `max(0, SOC - E_target)` only when `v2g=True`.
+4. **Signed meters**: each participant has a deterministic secp256k1 key derived from the seed and
+   its id. Each interval's reading (export, import, reported PV) is signed over keccak256 of its
+   canonical JSON and verified by address recovery. `coincurve` (C backend for eth_keys) is pinned:
+   it cuts sign+verify from ~8 ms to ~0.1 ms, so a 7-day, 100-participant run spends ~7 s on it.
+
+5. **Bots**: honest, lazy, strategic (overstates supply, asks at the floor), colluding ring, Sybil
+   identity, price manipulator (withholds supply), false reporter (inflates PV, claims full
+   delivery), defector (honest for N intervals, then delivers nothing), and non-revealer.
+
+6. **Colluding ring = bilateral wash trades**: every trade goes through central clearing, so a
+   ring cannot trade only with itself inside the market. The ring is modelled as members trading
+   through pre-arranged bilateral deals (the bilateral channel described by Nazir et al.), alternating
+   direction so the flows are reciprocal, all reported fully delivered. The trades are settled at
+   p_ref, logged with `channel = bilateral`, and visible to collusion detection.
+
+7. **Sybil farm**: one large seller plus 30 extra identities (on top of `--participants`) posting
+   fake demand at the ceiling. They have no load, so energy they win is exported at p_fit. With
+   defenses on they are probation newcomers (SDR weight 0.375, volume cap). Buyer reputation comes
+   from paying, so Sybil identities do earn buyer reputation; this is reported, not hidden.
+
+8. **Baselines**: B0 grid only; B1 fixed mid price (550) with seeded first-come greedy matching;
+   B2 Phase 1 SDR price (reputation weights neutral) with Nazir-style proportional allocation of the
+   long side; B3 `engine.clearing.clear_interval`. All return `ClearingResult`, and line loadings
+   are computed for every mode.
+
+9. **`--defenses off`** (B3 only): positions go to the engine with reputation = 1 (no weights, no
+   gate), no volume caps, and c_i / a_i are not fed into reputation. Detection still runs and logs
+   flags so detection rates can be measured. The median cap stays on (it lives in the Phase 2
+   engine); a switch for it belongs to the E10 ablations in Phase 11.
+
+10. **Settlement**: a seller's delivered Wh is split across its trades pro rata. Each trade settles
+    with `shortfall.settle_shortfall` on the *reported* delivery (the meter is the oracle). Every
+    participant's physical residual (actual need - P2P received + P2P delivered) settles with the
+    grid at p_ret / p_fit. Gains are measured against the same participant settling grid-only.
+
+11. **Flags do not suspend in the simulator**: the tier rule "Suspended if high-severity flag"
+    conflicts with "flags never ban anyone automatically". Suspension on a flag needs an admin
+    decision (Phase 10), so in the simulator flags only feed c_i and a_i.
+
+12. **Detection cadence**: every 12 intervals over a 96-interval window. c_i and a_i persist until
+    the next pass. a_i = max(IsolationForest score, worst PV-plausibility score in the window).
+    The feeder energy balance compares claimed export with physically delivered export and raises
+    a feeder-level flag (no attribution).
+
+13. **Line violations, two metrics**: `line_violations` counts physical overloads, including those
+    from base household load the market cannot control (an 8 kW feeder overloads even under B0).
+    `p2p_line_violations` counts overloads that P2P trading created or worsened, relative to the
+    same positions settled grid-only. The spec's "B3 never violates a line capacity" is
+    `p2p_line_violations == 0`. It holds in every scenario, and B3 relieves the grid (fewer
+    physical overloads than B0).
+
+14. **Determinism**: one `SeedSequence` spawns independent streams for weather, assignment, B1
+    arrival order and each participant. All outputs except `timing.csv` are byte-identical for a
+    given seed and code version (verified on a 7-day, 100-participant run). `config.json` records
+    the git commit and a dirty flag.
+
+15. **Output size**: `reputation.csv` is written hourly (every 4th interval plus the last) to keep
+    7-day runs small. Everything else is per interval.
+
+16. **Findings worth carrying into Phase 11**:
+    - The SDR price passes most of the surplus to buyers when supply is plentiful, so seller uplift
+      is lower than under a fixed mid price (B1) while buyer savings are higher.
+    - On day 1 every participant is a capped newcomer, so B3 volume is below its steady state; use
+      multi-day runs for comparisons.
+    - 50% PV inflation is only provable on sunny intervals, so false reporters can end with higher
+      reputation than honest sellers who take real weather shortfalls. Detection lowers their
+      reputation (0.81 off vs 0.69 on in a 50-participant, 3-day run) but does not stop it. E5
+      should quantify this.
+    - The collusion score flags some honest participants who had a single counterparty in the
+      window (the known PC = 1 false positive); E3 should report this rate.
 
 ## Phase 5: Smart Contracts
 

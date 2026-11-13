@@ -79,6 +79,40 @@ def test_newcomer_climbs_to_trusted_without_ever_being_excluded() -> None:
     assert classify(s, P) is Tier.TRUSTED
 
 
+def test_idle_newcomer_is_never_suspended() -> None:
+    """Found by the Phase 4 simulator: idle decay widens sigma and drops R below 0.15."""
+    s = initial_state(P)
+    for _ in range(500):
+        s = update(s, None, P)
+    assert reputation(s, P) < P.suspended_below
+    assert classify(s, P) is Tier.PROBATION
+    assert matching_reputation(s, classify(s, P), P) >= P.rho_min
+
+
+def _idle_after_trusted(params: object, weeks: int) -> Tier:
+    s = initial_state(params)  # type: ignore[arg-type]
+    for _ in range(300):
+        s = update(s, Evidence(volume_kwh=1), params)  # type: ignore[arg-type]
+    tier = classify(s, params)  # type: ignore[arg-type]
+    assert tier is Tier.TRUSTED
+    for _ in range(672 * weeks):
+        s = update(s, None, params)  # type: ignore[arg-type]
+        tier = classify(s, params, prev_tier=tier)  # type: ignore[arg-type]
+    return tier
+
+
+def test_long_absence_spec_decay_keeps_near_perfect_participant_trusted() -> None:
+    """Edge case 10 under the spec decay (toward 0): the mean is preserved and, with mu near 1,
+    sigma stays small, so a near-perfect participant is not demoted by idleness alone."""
+    assert _idle_after_trusted(P, weeks=12) is Tier.TRUSTED
+
+
+def test_long_absence_decay_to_prior_demotes_but_does_not_suspend() -> None:
+    """Edge case 10 as the team document describes it (decay toward the prior)."""
+    tier = _idle_after_trusted(replace(P, decay_to_prior=True), weeks=12)
+    assert tier in (Tier.PROBATION, Tier.STANDARD)
+
+
 def test_intervals_to_trusted() -> None:
     # Evidence gate (100 intervals) dominates once R passes 0.8 at ~20 intervals.
     assert intervals_to_tier(initial_state(P), Tier.TRUSTED, P) == 100

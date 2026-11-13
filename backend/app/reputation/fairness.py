@@ -18,7 +18,7 @@ Report metrics (project report sections 4.3 / 4.4, edge cases doc):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Sequence
+from typing import Dict, Iterable, List, Mapping, Protocol, Sequence
 
 from app.core.params import DEFAULT_PARAMS, MarketParams
 from app.engine.pricing import Position
@@ -41,7 +41,9 @@ def jain_index(values: Sequence[float]) -> float:
     sq = sum(v * v for v in values)
     if sq <= 0:
         return 1.0
-    return _r(s * s / (len(values) * sq))
+    n = len(values)
+    # clamp: with subnormal floats the squares lose precision and the ratio can drift out of range
+    return _r(min(1.0, max(1.0 / n, s * s / (n * sq))))
 
 
 def matched_shares(offered_wh: Mapping[str, int], matched_wh: Mapping[str, int]) -> Dict[str, float]:
@@ -167,6 +169,19 @@ def grid_trust_density(tiers: Mapping[str, Tier]) -> float:
 # ─── Welfare and market economics ──────────────────────────────────────────────
 
 
+class TradeLike(Protocol):
+    """Anything trade-shaped (engine ``ClearedTrade``, ``TradeView``, ...)."""
+
+    @property
+    def buyer_id(self) -> str: ...
+
+    @property
+    def seller_id(self) -> str: ...
+
+    @property
+    def qty_wh(self) -> int: ...
+
+
 @dataclass(frozen=True)
 class TradeView:
     buyer_id: str
@@ -174,7 +189,7 @@ class TradeView:
     qty_wh: int
 
 
-def trade_welfare(trades: Iterable[TradeView], positions: Sequence[Position]) -> float:
+def trade_welfare(trades: Iterable[TradeLike], positions: Sequence[Position]) -> float:
     """Sum over trades of (b_i - a_j) * kWh, in price units * kWh."""
     limit = {p.participant_id: p.limit_price for p in positions}
     return sum((limit[t.buyer_id] - limit[t.seller_id]) * t.qty_wh / 1000.0 for t in trades)
@@ -188,7 +203,7 @@ def welfare_efficiency(matched_welfare: float, optimal_welfare: float) -> float:
 
 
 def welfare_gains(
-    trades: Iterable[TradeView],
+    trades: Iterable[TradeLike],
     p_ref: float,
     params: MarketParams = DEFAULT_PARAMS,
     participants: Iterable[str] = (),
@@ -220,7 +235,7 @@ class MarketEconomics:
 
 
 def market_economics(
-    trades: Iterable[TradeView],
+    trades: Iterable[TradeLike],
     unmatched_buy_wh: Mapping[str, int],
     unmatched_sell_wh: Mapping[str, int],
     p_ref: float,
