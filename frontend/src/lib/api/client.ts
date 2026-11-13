@@ -1,4 +1,6 @@
 import type {
+  FairnessBaseline,
+  FairnessHistory,
   GridStatus,
   Health,
   Interval,
@@ -12,6 +14,8 @@ import type {
   PositionCreate,
   PricePoint,
   Reputation,
+  ReputationHistory,
+  ReputationProof,
   TokenResponse,
   Trade,
 } from "./types";
@@ -141,5 +145,14 @@ export const api = {
   },
   reputation: (address: string) =>
     request<Reputation>(`/reputation/${address}`, { auth: false }),
+  reputationHistory: (address: string) =>
+    request<ReputationHistory>(`/reputation/${address}/history`, { auth: false }),
+  reputationProof: (address: string, intervalId: number) =>
+    request<ReputationProof>(
+      `/reputation/${address}/proof${qs({ interval_id: intervalId })}`,
+      { auth: false },
+    ),
   grid: () => request<GridStatus>("/grid/status", { auth: false }),
+  fairnessHistory: (baseline: FairnessBaseline = "B3", limit = 96) =>
+    request<FairnessHistory>(`/fairness/history${qs({ baseline, limit })}`, { auth: false }),
 };

@@ -84,6 +84,10 @@ export function applyMessage(qc: QC, msg: WsMessage) {
         qc.invalidateQueries({ queryKey: queryKeys.orderbook });
         qc.invalidateQueries({ queryKey: queryKeys.positionsMine });
       }
+      // Fairness rows are appended at METERED.
+      if (data.state === "METERED" || data.state === "SETTLED") {
+        qc.invalidateQueries({ queryKey: ["fairness"] });
+      }
       break;
     }
     case "price": {

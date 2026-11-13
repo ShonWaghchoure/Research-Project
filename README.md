@@ -21,7 +21,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **6** | Backend foundation | ✅ **Done** |
 | **7** | Market lifecycle | ✅ **Done** |
 | **8** | Frontend foundation | ✅ **Done** |
-| 9 | Frontend market views | ⬜ Pending |
+| **9** | Frontend market views | ✅ **Done** |
 | 10 | Attack lab, audit, admin | ⬜ Pending |
 | 11 | Experiments | ⬜ Pending |
 | 12 | Hardening, deploy, docs | ⬜ Pending |
@@ -391,6 +391,41 @@ Built:
 **When Phase 7 lands:** run `make gen-api`, reconcile `frontend/src/lib/api/types.ts`, and set
 `NEXT_PUBLIC_API_URL` to the real backend. The response fields the UI expects are listed in
 `docs/DECISIONS.md` (Phase 8, item 1). Item 2 there is a timing issue the Phase 7 clock worker needs to handle.
+
+---
+
+## Phase 9 Smoke Test Results
+
+Market, Grid, Reputation and Fairness pages are live against the Phase 7/9 mock API
+(`frontend/mock/server.mjs`), with WebSocket-driven updates and on-chain Merkle verification
+via `ReputationAnchor` when Hardhat is running.
+
+```
+npm test                  →  43 passed (6 files)
+  - Phase 8 suite still green
+  - Phase 9: SdrGauge, TradesFeed empty/rows, TierLadder, ComponentRadar,
+    WhatIfPanel (intervalsToTrusted), MetricCards, FeederMap node select
+
+npx playwright test e2e/phase9-pages.spec.ts e2e/responsive.spec.ts
+                          →  31 passed
+  - phase9-pages: /market, /grid, /reputation, /fairness load with no console errors
+  - responsive: 9 pages × 375 / 768 / 1440 px — no horizontal scroll, no console errors
+
+npx tsc --noEmit          →  no errors
+next lint                 →  No ESLint warnings or errors
+next build                →  ✓ 12 routes compiled
+```
+
+Built:
+- `/market` — PriceBandChart, SdrGauge, DepthChart, TradesFeed, price-formation tooltips, tweened price
+- `/grid` — SVG feeder tree with line loadings, congestion marks, clickable node participants
+- `/reputation` — score history, ComponentRadar, TierLadder, WhatIfPanel, ProofVerifier (Merkle ↔ chain)
+- `/fairness` — MetricCards (Jain, Gini, HHI, parity, price impact, welfare) + B2/B3 time series
+- Mock: `/reputation/{addr}/history`, `/reputation/{addr}/proof`, `/fairness/history`, grid nodes,
+  seeded price/fairness/reputation history and an initial on-chain reputation root
+- Shared chart tokens: `src/lib/chart-theme.ts`
+- Tests: `src/components/phase9.test.tsx`, `e2e/phase9-pages.spec.ts`
+
 ## Phase 7 Smoke Test Results
 
 ```

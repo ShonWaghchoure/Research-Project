@@ -353,8 +353,10 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 
 9. **Shell-free pages.** Landing and onboarding render without the sidebar and do not open the WebSocket.
 
-10. **Phase 9 pages.** Market, Grid, Reputation and Fairness are in the navigation with a short placeholder, so the
-    structure is final now and Phase 9 only fills them in.
+10. **Phase 9 pages.** Market, Grid, Reputation and Fairness use the Phase 8 design system and live mock data
+    (price/orderbook/trades/grid/reputation/fairness). The feeder map is a fixed-layout SVG (not React Flow/D3)
+    so it stays light and keyboard-accessible. Fairness B2 vs B3 series are simulated in the mock until the
+    experiment store exists. ProofVerifier calls `GET /reputation/{addr}/proof` then `ReputationAnchor.verifyScore`.
 
 11. **`/status`.** Shon's Phase 6 health and login demo page is kept as a plain System status page
     (backend health, session, contract addresses) instead of being deleted.

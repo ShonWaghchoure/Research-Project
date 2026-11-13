@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { createPublicClient, createWalletClient, encodeAbiParameters, getAddress, http as viemHttp, keccak256, verifyMessage } from "viem";
+import { concat, createPublicClient, createWalletClient, encodeAbiParameters, encodePacked, getAddress, http as viemHttp, keccak256, verifyMessage } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 
@@ -31,6 +31,7 @@ const OPERATOR_PK = process.env.OPERATOR_PRIVATE_KEY ?? "0xac0974bec39a17e36ba4a
 
 const deployments = JSON.parse(readFileSync(path.join(__dirname, "..", "src", "contracts", "localhost.json"), "utf8"));
 const SETTLEMENT = deployments.contracts.Settlement;
+const ANCHOR = deployments.contracts.ReputationAnchor;
 
 const P_FIT = 300, P_RET = 800, K = 2, ALPHA = 0.7;
 
@@ -82,19 +83,28 @@ const positions = []; // user positions
 const trades = [];
 const priceHistory = [];
 const reputations = new Map(); // address -> { alpha, beta, evidence }
+/** @type {Map<string, object[]>} address -> history points */
+const reputationHistory = new Map();
+/** @type {Map<string, object>} `${intervalId}:${addressLower}` -> score row with leaf/proof inputs */
+const reputationScores = new Map();
+/** @type {Map<number, string>} intervalId -> merkle root */
+const reputationRoots = new Map();
+/** @type {object[]} fairness metric rows for B2 and B3 */
+const fairnessHistory = [];
 let intervals = [];
 let current = null;
 let nextIntervalId = Number(process.env.MOCK_FIRST_INTERVAL ?? Math.floor(Date.now() / 1000) % 100000);
 let nextId = 1;
 let prevPRef = null;
 
-const NODES = ["n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11", "n12"];
+const NODES = ["n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11", "n12"];
+const FEEDER_NODES = NODES.slice(1); // participants sit on n1..n12; n0 is the transformer
 const LINES = [["n0", "n1"], ["n0", "n2"], ["n0", "n3"], ["n1", "n4"], ["n1", "n5"], ["n1", "n6"], ["n2", "n7"], ["n3", "n8"], ["n3", "n9"], ["n7", "n10"], ["n10", "n11"], ["n10", "n12"]];
 
 function pseudo(i) {
   return getAddress(`0x${keccak256(encodeAbiParameters([{ type: "uint256" }], [BigInt(1000 + i)])).slice(26)}`);
 }
-const BOTS = Array.from({ length: 24 }, (_, i) => ({ address: pseudo(i), node: NODES[i % NODES.length], seller: i % 3 !== 0 }));
+const BOTS = Array.from({ length: 24 }, (_, i) => ({ address: pseudo(i), node: FEEDER_NODES[i % FEEDER_NODES.length], seller: i % 3 !== 0 }));
 
 let botBook = { bids: [], asks: [], supply_wh: 0, demand_wh: 0 };
 function makeBotBook(seed) {
@@ -267,18 +277,236 @@ function meter(iv) {
       broadcast("reputation", "updated", repOut(a));
     }
   }
+  // Give bots a quiet evidence bump so the Merkle tree always has many leaves.
+  for (const b of BOTS) {
+    const r = rep(b.address);
+    r.alpha += 0.4;
+    r.evidence += 1;
+  }
+  for (const u of users.values()) {
+    if (!u.participant) continue;
+    const r = rep(u.address);
+    if (r.evidence === 0) {
+      r.alpha += 0.5;
+      r.evidence += 1;
+    }
+  }
+  anchorReputation(iv).catch((e) => console.warn(`[mock] reputation anchor failed: ${String(e.shortMessage ?? e.message).split("\n")[0]}`));
+  pushFairness(iv);
+}
+
+function reputationLeaf(address, scoreBp, evidenceCount) {
+  return keccak256(encodePacked(["address", "uint16", "uint32"], [getAddress(address), scoreBp, evidenceCount]));
+}
+
+function hashPair(a, b) {
+  const [left, right] = BigInt(a) <= BigInt(b) ? [a, b] : [b, a];
+  return keccak256(concat([left, right]));
+}
+
+function buildMerkle(leaves) {
+  if (!leaves.length) throw new Error("no leaves");
+  let layer = [...leaves];
+  const layers = [layer];
+  while (layer.length > 1) {
+    const next = [];
+    for (let i = 0; i < layer.length; i += 2) {
+      if (i + 1 === layer.length) next.push(layer[i]);
+      else next.push(hashPair(layer[i], layer[i + 1]));
+    }
+    layer = next;
+    layers.push(layer);
+  }
+  return { root: layers[layers.length - 1][0], layers, leaves };
+}
+
+function merkleProof(leaves, index) {
+  const tree = buildMerkle(leaves);
+  const proof = [];
+  let idx = index;
+  for (const layer of tree.layers.slice(0, -1)) {
+    const pair = idx ^ 1;
+    if (pair < layer.length) proof.push(layer[pair]);
+    idx = Math.floor(idx / 2);
+  }
+  return { proof, root: tree.root };
+}
+
+async function postRootOnChain(intervalId, root) {
+  if (!(await probeChain())) return false;
+  try {
+    const hash = await walletClient.writeContract({
+      address: ANCHOR.address,
+      abi: ANCHOR.abi,
+      functionName: "postRoot",
+      args: [BigInt(intervalId), root],
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+    return true;
+  } catch (e) {
+    console.warn(`[mock] postRoot(${intervalId}) failed: ${String(e.shortMessage ?? e.message).split("\n")[0]}`);
+    return false;
+  }
+}
+
+async function anchorReputation(iv) {
+  const addresses = [
+    ...new Set([
+      ...BOTS.map((b) => b.address),
+      ...DEMO_ACCOUNTS,
+      ...[...users.values()].filter((u) => u.participant).map((u) => u.address),
+    ]),
+  ]
+    .map((a) => getAddress(a))
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const rows = addresses.map((address) => {
+    const out = repOut(address);
+    const score_bp = Math.max(0, Math.min(10_000, Math.round(out.score * 10_000)));
+    const leaf_hash = reputationLeaf(address, score_bp, out.evidence_count);
+    return { address, score_bp, evidence_count: out.evidence_count, leaf_hash, out };
+  });
+  const leaves = rows.map((r) => r.leaf_hash);
+  const { root } = buildMerkle(leaves);
+  reputationRoots.set(iv.id, root);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const key = `${iv.id}:${row.address.toLowerCase()}`;
+    reputationScores.set(key, {
+      address: row.address,
+      interval_id: iv.id,
+      score_bp: row.score_bp,
+      evidence_count: row.evidence_count,
+      leaf_hash: row.leaf_hash,
+      leaf_index: i,
+      leaves,
+    });
+    const hist = reputationHistory.get(row.address.toLowerCase()) ?? [];
+    hist.push({
+      interval_id: iv.id,
+      ends_at: iv.ends_at,
+      score: row.out.score,
+      score_bp: row.score_bp,
+      tier: row.out.tier,
+      evidence_count: row.evidence_count,
+      components: row.out.components,
+    });
+    if (hist.length > 200) hist.shift();
+    reputationHistory.set(row.address.toLowerCase(), hist);
+  }
+  await postRootOnChain(iv.id, root);
+}
+
+function pushFairness(iv) {
+  const r = mulberry32(iv.id * 19);
+  const base = {
+    interval_id: iv.id,
+    ends_at: iv.ends_at,
+    jain: Number((0.72 + r() * 0.22).toFixed(3)),
+    gini: Number((0.12 + r() * 0.18).toFixed(3)),
+    hhi: Number((0.08 + r() * 0.12).toFixed(3)),
+    small_actor_parity: Number((0.85 + r() * 0.25).toFixed(3)),
+    price_impact: Number((0.01 + r() * 0.04).toFixed(4)),
+    welfare_efficiency: Number((0.88 + r() * 0.1).toFixed(3)),
+  };
+  // B2 (SDR + proportional, no reputation/grid) is slightly less fair / efficient.
+  fairnessHistory.push({
+    ...base,
+    baseline: "B3",
+  });
+  fairnessHistory.push({
+    interval_id: iv.id,
+    ends_at: iv.ends_at,
+    baseline: "B2",
+    jain: Number(Math.max(0.4, base.jain - 0.08 - r() * 0.06).toFixed(3)),
+    gini: Number(Math.min(0.6, base.gini + 0.06 + r() * 0.05).toFixed(3)),
+    hhi: Number(Math.min(0.4, base.hhi + 0.04 + r() * 0.04).toFixed(3)),
+    small_actor_parity: Number(Math.max(0.4, base.small_actor_parity - 0.12 - r() * 0.08).toFixed(3)),
+    price_impact: Number((base.price_impact + 0.01 + r() * 0.02).toFixed(4)),
+    welfare_efficiency: Number(Math.max(0.6, base.welfare_efficiency - 0.05 - r() * 0.05).toFixed(3)),
+  });
+  if (fairnessHistory.length > 800) fairnessHistory.splice(0, fairnessHistory.length - 800);
+}
+
+/** Well-known Hardhat accounts #1–#4 so demo wallets have reputation history. */
+const DEMO_ACCOUNTS = [
+  "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+  "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+  "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+];
+
+function seedHistory() {
+  const start = Date.now() - 48 * INTERVAL_SECONDS * 1000;
+  for (let i = 0; i < 48; i++) {
+    const r = mulberry32(1000 + i);
+    const sdr = Number((0.6 + r() * 1.6).toFixed(4));
+    const p = referencePrice(sdr);
+    prevPRef = p;
+    const ends = new Date(start + (i + 1) * INTERVAL_SECONDS * 1000).toISOString();
+    priceHistory.push({ interval_id: nextIntervalId - 48 + i, ends_at: ends, p_ref_paise: p, sdr });
+    const ivLike = { id: nextIntervalId - 48 + i, ends_at: ends };
+    pushFairness(ivLike);
+  }
+  // Warm demo wallets so the Reputation page is not empty on first connect.
+  for (const a of DEMO_ACCOUNTS) {
+    const r = rep(a);
+    r.alpha = 12;
+    r.beta = 4;
+    r.evidence = 40;
+    r.reveal = 1;
+    r.honesty = 0.95;
+    r.collusion = 0.05;
+    const hist = [];
+    for (let i = 0; i < 48; i++) {
+      const rr = mulberry32(2000 + DEMO_ACCOUNTS.indexOf(a) * 100 + i);
+      const score = Number((0.35 + (i / 48) * 0.4 + rr() * 0.05).toFixed(3));
+      const ends = new Date(start + (i + 1) * INTERVAL_SECONDS * 1000).toISOString();
+      hist.push({
+        interval_id: nextIntervalId - 48 + i,
+        ends_at: ends,
+        score,
+        score_bp: Math.round(score * 10_000),
+        tier: score >= 0.8 ? "trusted" : score >= 0.5 ? "standard" : "probation",
+        evidence_count: Math.min(100, 5 + i),
+        components: {
+          delivery: Number((0.6 + i / 80).toFixed(3)),
+          reveal: 1,
+          honesty: 0.95,
+          collusion: 0.05,
+        },
+      });
+    }
+    reputationHistory.set(a.toLowerCase(), hist);
+  }
+}
+
+async function seedReputationProof() {
+  const seedIv = { id: nextIntervalId - 1, ends_at: new Date().toISOString() };
+  await anchorReputation(seedIv);
 }
 
 function gridStatus() {
   const r = mulberry32((current?.id ?? 1) * 13);
   const lines = LINES.map(([a, b]) => ({ id: `l_${a}_${b}`, from_node: a, to_node: b, capacity_kw: 100, loading_pct: Number((15 + r() * 60).toFixed(1)) }));
   const congested = lines.filter((l) => l.loading_pct > 70).map((l) => l.id);
+  const byNode = Object.fromEntries(FEEDER_NODES.map((n) => [n, []]));
+  for (const b of BOTS) byNode[b.node].push({ address: b.address, kind: b.seller ? "prosumer" : "consumer" });
+  for (const u of users.values()) {
+    if (!u.participant) continue;
+    const node = u.participant.feeder_node_id || FEEDER_NODES[u.id % FEEDER_NODES.length];
+    if (!byNode[node]) byNode[node] = [];
+    byNode[node].push({ address: u.address, kind: u.participant.type ?? "consumer" });
+  }
   return {
     interval_id: current?.id ?? 0,
     lines,
     congested_line_ids: congested,
     max_loading_pct: Math.max(...lines.map((l) => l.loading_pct)),
     p2p_share_pct: Number((55 + r() * 20).toFixed(1)),
+    nodes: [
+      { id: "n0", label: "Transformer", kind: "root", participants: [] },
+      ...FEEDER_NODES.map((id) => ({ id, label: id.toUpperCase(), kind: "feeder", participants: byNode[id] ?? [] })),
+    ],
   };
 }
 
@@ -450,9 +678,40 @@ async function route(req, res) {
     if (!t) throw new HttpError(404, "trade not found");
     return json(res, 200, { ...t, side: null });
   }
+  const rh = p.match(/^\/reputation\/(0x[0-9a-fA-F]{40})\/history$/);
+  if (rh) {
+    const address = getAddress(rh[1]);
+    const history = reputationHistory.get(address.toLowerCase()) ?? [];
+    return json(res, 200, { address, history });
+  }
+  const rp = p.match(/^\/reputation\/(0x[0-9a-fA-F]{40})\/proof$/);
+  if (rp) {
+    const address = getAddress(rp[1]);
+    const intervalId = Number(url.searchParams.get("interval_id"));
+    if (!Number.isInteger(intervalId)) throw new HttpError(422, "interval_id: required integer");
+    const row = reputationScores.get(`${intervalId}:${address.toLowerCase()}`);
+    if (!row) throw new HttpError(404, "score not found for interval");
+    const { proof, root } = merkleProof(row.leaves, row.leaf_index);
+    return json(res, 200, {
+      address,
+      interval_id: intervalId,
+      score_bp: row.score_bp,
+      evidence_count: row.evidence_count,
+      leaf_hash: row.leaf_hash,
+      proof,
+      root,
+    });
+  }
   const rm = p.match(/^\/reputation\/(0x[0-9a-fA-F]{40})$/);
   if (rm) return json(res, 200, repOut(getAddress(rm[1])));
   if (p === "/grid/status") return json(res, 200, gridStatus());
+  if (p === "/fairness/history") {
+    const baseline = (url.searchParams.get("baseline") ?? "B3").toUpperCase();
+    if (baseline !== "B2" && baseline !== "B3") throw new HttpError(422, "baseline: must be B2 or B3");
+    const limit = Number(url.searchParams.get("limit") ?? 96);
+    const rows = fairnessHistory.filter((f) => f.baseline === baseline).slice(-limit);
+    return json(res, 200, { baseline, metrics: rows });
+  }
   throw new HttpError(404, "not found");
 }
 
@@ -484,8 +743,10 @@ wss.on("connection", (ws) => {
 
 // ---- start ---------------------------------------------------------------------------
 await probeChain();
+seedHistory();
+await seedReputationProof();
 newInterval();
 setInterval(tick, 500);
 server.listen(PORT, () => {
-  console.log(`[mock] Phase 7 mock API on http://localhost:${PORT} (ws: /ws), interval ${INTERVAL_SECONDS}s, chain ${chainOk ? "connected" : "unreachable (chain-less mode)"}`);
+  console.log(`[mock] Phase 7/9 mock API on http://localhost:${PORT} (ws: /ws), interval ${INTERVAL_SECONDS}s, chain ${chainOk ? "connected" : "unreachable (chain-less mode)"}`);
 });

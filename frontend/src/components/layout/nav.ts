@@ -20,10 +20,10 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/trade", label: "Trade", icon: ArrowLeftRight },
-  { href: "/market", label: "Market", icon: BarChart3, phase: 9 },
-  { href: "/grid", label: "Grid", icon: Network, phase: 9 },
-  { href: "/reputation", label: "Reputation", icon: ShieldCheck, phase: 9 },
-  { href: "/fairness", label: "Fairness", icon: Scale, phase: 9 },
+  { href: "/market", label: "Market", icon: BarChart3 },
+  { href: "/grid", label: "Grid", icon: Network },
+  { href: "/reputation", label: "Reputation", icon: ShieldCheck },
+  { href: "/fairness", label: "Fairness", icon: Scale },
 ];
 
 export const SECONDARY_NAV: NavItem[] = [{ href: "/status", label: "System status", icon: Activity }];

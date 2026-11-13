@@ -120,12 +120,70 @@ export interface GridLine {
   loading_pct: number;
 }
 
+export interface GridParticipant {
+  address: string;
+  kind: string;
+}
+
+export interface GridNode {
+  id: string;
+  label: string;
+  kind: "root" | "feeder" | string;
+  participants: GridParticipant[];
+}
+
 export interface GridStatus {
   interval_id: number;
   lines: GridLine[];
   congested_line_ids: string[];
   max_loading_pct: number;
   p2p_share_pct: number;
+  /** Present from Phase 9 mock / backend. */
+  nodes?: GridNode[];
+}
+
+export interface ReputationHistoryPoint {
+  interval_id: number;
+  ends_at: string;
+  score: number;
+  score_bp: number;
+  tier: Tier;
+  evidence_count: number;
+  components: Reputation["components"];
+}
+
+export interface ReputationHistory {
+  address: string;
+  history: ReputationHistoryPoint[];
+}
+
+export interface ReputationProof {
+  address: string;
+  interval_id: number;
+  score_bp: number;
+  evidence_count: number;
+  leaf_hash: string;
+  proof: `0x${string}`[];
+  root: `0x${string}`;
+}
+
+export type FairnessBaseline = "B2" | "B3";
+
+export interface FairnessMetric {
+  interval_id: number;
+  ends_at: string;
+  baseline: FairnessBaseline;
+  jain: number;
+  gini: number;
+  hhi: number;
+  small_actor_parity: number;
+  price_impact: number;
+  welfare_efficiency: number;
+}
+
+export interface FairnessHistory {
+  baseline: FairnessBaseline;
+  metrics: FairnessMetric[];
 }
 
 export interface WsMessage<T = unknown> {

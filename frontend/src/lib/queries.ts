@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
+import type { FairnessBaseline } from "./api/types";
 import { useAuth } from "./auth";
 
 export const queryKeys = {
@@ -12,7 +13,11 @@ export const queryKeys = {
   positionsMine: ["positions", "mine"] as const,
   trades: (mine = false) => ["trades", mine ? "mine" : "all"] as const,
   reputation: (address: string) => ["reputation", address.toLowerCase()] as const,
+  reputationHistory: (address: string) => ["reputation", address.toLowerCase(), "history"] as const,
+  reputationProof: (address: string, intervalId: number) =>
+    ["reputation", address.toLowerCase(), "proof", intervalId] as const,
   grid: ["grid"] as const,
+  fairness: (baseline: FairnessBaseline) => ["fairness", baseline] as const,
 };
 
 export const useHealth = () =>
@@ -58,5 +63,19 @@ export const useReputation = (address?: string | null) =>
     enabled: !!address,
   });
 
+export const useReputationHistory = (address?: string | null) =>
+  useQuery({
+    queryKey: queryKeys.reputationHistory(address ?? ""),
+    queryFn: () => api.reputationHistory(address as string),
+    enabled: !!address,
+  });
+
 export const useGridStatus = () =>
   useQuery({ queryKey: queryKeys.grid, queryFn: api.grid, refetchInterval: 30_000 });
+
+export const useFairnessHistory = (baseline: FairnessBaseline = "B3", limit = 96) =>
+  useQuery({
+    queryKey: [...queryKeys.fairness(baseline), limit],
+    queryFn: () => api.fairnessHistory(baseline, limit),
+    refetchInterval: 30_000,
+  });

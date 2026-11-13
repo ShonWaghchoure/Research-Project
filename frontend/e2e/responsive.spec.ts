@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
  * Screenshots go to test-results/screens/ for review.
  */
 const WIDTHS = [375, 768, 1440] as const;
-const PAGES = ["/", "/onboarding", "/dashboard", "/trade", "/status", "/market"] as const;
+const PAGES = ["/", "/onboarding", "/dashboard", "/trade", "/status", "/market", "/grid", "/reputation", "/fairness"] as const;
 
 for (const width of WIDTHS) {
   test.describe(`${width}px`, () => {
