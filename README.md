@@ -13,7 +13,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | Phase | Name | Status |
 |-------|------|--------|
 | **0** | Walking skeleton | ✅ **Done** |
-| **1** | Pricing engine (SDR) | 🔄 **In progress** |
+| **1** | Pricing engine (SDR) | ✅ **Done** |
 | 2 | Matching and clearing engine | ⬜ Pending |
 | 3 | Reputation, defenses, fairness | ⬜ Pending |
 | 4 | Simulator and baselines | ⬜ Pending |
@@ -128,6 +128,25 @@ ruff check .      →  All checks passed
 mypy app          →  Success: no issues found in 14 source files
 next build        →  ✓ Compiled successfully, route / = 99.9 kB
 ```
+
+---
+
+## Phase 1 Smoke Test Results
+
+```
+pytest tests/engine/test_pricing.py -v
+  17 passed (2.16s)
+  - 5 worked SDR→price values (0.25→7.71, 0.5→7.00, 1→5.50, 2→4.00, 4→3.29)
+  - edge cases: empty / zero demand / zero supply / smoothing / median cap / reputation
+  - 4 Hypothesis property tests × 200 examples each
+
+pytest -v         →  19 passed (5.24s)   # pricing + health
+ruff check .      →  All checks passed
+mypy app          →  Success: no issues found in 15 source files
+```
+
+Built: `backend/app/engine/pricing.py` (`Position`, `PriceResult`, `compute_reference_price`, `price_impact`)
+Tests: `backend/tests/engine/test_pricing.py`
 
 ---
 
