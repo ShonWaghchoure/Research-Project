@@ -436,3 +436,97 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 6. **Hardhat restart vs DB.** Confirmed `transactions` rows from a previous local chain must not
    block re-send. `ChainClient` re-checks receipts on the live RPC before skipping; `make demo`
    also runs `python -m app.db.reset_market` after deploy so intervals start clean.
+
+---
+
+## Security audit (after Phase 12)
+
+Whole-repo review of contracts, backend, frontend, mock and config. Every finding was checked
+against the code before fixing; each fix has a regression test. Severity is for a public
+(Sepolia) deployment.
+
+### Fixed — critical / high
+
+1. **Admin was Hardhat account #0 (public key).** The seed made index 0 admin on any chain.
+   Off the local chain the seed now creates no Hardhat users and grants admin/operator only to
+   `ADMIN_ADDRESSES` / `OPERATOR_ADDRESSES` (it refuses to run without them).
+2. **Public secrets accepted on real networks.** Off chain 31337 the backend refuses to start with
+   the default `JWT_SECRET` (or one under 32 chars), a Hardhat operator key, or a localhost
+   `SIWE_DOMAIN`. Tokens are also bound to their wallet: `sub` must match the user's address.
+3. **Sign-In With Ethereum accepted any message containing the nonce** (phishing → session
+   takeover). The server now rebuilds the exact message it issued (configured domain/URI,
+   chain, issue time, expiry) and requires a byte-for-byte match within 5 minutes.
+4. **Unbounded positions.** Limit price must be within [p_fit, p_ret]; sell ≤ PV×interval +
+   battery (+ EV if V2G); buy ≤ 25 kWh + storage; deadline bounded (0 = none); absurd values
+   are 422 instead of 500.
+5. **Frontend could not trade against the real backend** (server ignored the browser's salt; the
+   client correctly refused the mismatched hash). The API accepts the browser salt and returns `id`.
+6. **Reveal fail-open.** Reveals are accepted only in the REVEAL window, require a matching
+   on-chain commit (fail closed if the chain is unreachable), and lock the interval row so a reveal
+   cannot race clearing. Concurrent duplicate submissions are 409.
+7. **Reverted chain writes were treated as success**, and `delivery_root` was saved before
+   `postDelivery`; a failed interval was then abandoned with no money moved. `send_tx` raises on
+   revert / non-confirmation, never re-sends a tx it could not check (RPC error ≠ missing), keeps
+   mempool txs as submitted, and releases a nonce if building fails. The meter runs only after
+   clearing and every batch are confirmed and stores `delivery_root` after confirmation; the clock
+   opens the next interval only when the delivery and reputation roots are on chain.
+8. **One unfunded buyer reverted a whole settle batch.** Clearing caps each buy at what on-chain
+   escrow covers at the buyer's limit; a reverting batch is retried trade by trade.
+9. **Mock server handed out admin tokens and listened on all interfaces.** `dev-login` requires
+   `MOCK_DEV_LOGIN=1` (tests only); binds 127.0.0.1; CORS limited to the local frontend; streamed
+   body limit; tokens expire; exact-message SIWE; refuses the Hardhat key against a non-local RPC.
+10. **Local services exposed.** Compose publishes Postgres/Redis/Hardhat on 127.0.0.1 only; the dev
+    backend binds 127.0.0.1; `make demo` generates a random `JWT_SECRET`.
+11. **Next.js 14.2.35 (final 14.x) had critical advisories** (image-optimizer RCE, RSC DoS).
+    Upgraded to Next 15.5.29 + React 19; image optimizer disabled (app uses no `next/image`);
+    nested `ws`/`postcss`/`viem` forced to patched versions.
+
+### Fixed — contracts (Settlement / Registry)
+
+- `settleBatch`: trades keyed by (buyer, seller) — the engine emits one per pair per interval — so
+  the same match cannot be re-settled with another quantity; both parties must have committed in
+  the interval, so an operator key cannot move escrow from a non-participant.
+- Only `Registry.isActive` accounts (registered, not suspended, stake ≥ min) can commit.
+- Buyer escrow is locked from commit until the interval's delivery is posted (1-day escape hatch);
+  withdrawal still works while paused.
+- Shortfalls are per (seller, buyer) leaf, so every short-changed buyer is compensated. Because
+  `settleBatch` charges the full promised quantity, the buyer also gets a refund of `e·p_ref`, so it
+  ends up paying `p_ref` for what it was promised (the spec's intent); penalty to an accounted,
+  admin-sweepable `treasury`.
+- `slash` draws from queued withdrawals too (no escape by `requestWithdraw`), never reverts for
+  lack of funds (pays the buyer first), and sub-paisa shortfalls no longer revert.
+- New: `deregister` (stake no longer locked forever), admin `unsuspend` / `releaseMeterKey` (undo
+  meter-key squatting); withdraw cooldown capped at 365 days.
+
+### Fixed — medium / low
+
+- `/audit/{id}` withholds bids until the reveal window closes (no selective-reveal advantage).
+- Audit re-run uses a `clearing_inputs` snapshot stored at clearing, so later profile/config edits
+  no longer produce false "tampered" results; the result hash now covers integer paise/Wh and is
+  recomputed from published trades.
+- Clearing drops revealed positions without a matching on-chain commit (reveal miss with reason).
+- Admin config is validated (types, ranges, p_fit < p_ret ≤ 800, beta ≤ 5% band, weights sum to 1).
+- Equipment and feeder-node changes are admin-only and audit-logged (they feed detection and audit).
+- The under-delivering demo bot is identified by address, not by a user-editable "lazy" name.
+- WebSocket: one shared Redis subscription per process, 500 total / 20 per-IP caps, Origin check.
+- Bot top-ups use state-versioned idempotency keys (previously they never topped up again).
+- Listener keeps every event of a batch tx (keyed by log index).
+- kWh→Wh floor no longer loses 1 Wh (e.g. 1001 → 1000).
+- `/health` no longer echoes internal error text; bad Content-Length is 400; invalid reputation
+  address is 422; Merkle proof index uses the same leaf list as the tree.
+- Frontend: session cleared and caches dropped on wallet change; admin UI requires the session to
+  match the connected wallet; commit flow resumes from the on-chain commit after refresh (with a
+  "Commit now" button); demo wallets need explicit opt-in in production builds; contract addresses
+  are required off the local chain; security headers (frame-ancestors, nosniff, referrer policy);
+  explorer links are https-only; onboarding checks for enough tokens to stake.
+- `requirements.txt` pinned scikit-learn twice (1.9.1 and 1.7.2), so a fresh install failed.
+
+### Accepted / out of scope
+
+- Remaining `npm audit` highs are inside WalletConnect/Reown/Coinbase SDKs pulled in by
+  `wagmi/connectors`. The app imports only `injected` and `mock` from `@wagmi/core`; a scan of the
+  built client bundle finds no code from those packages. Removing them needs wagmi 3.
+- The operator remains trusted-but-verifiable: it sees reveals before clearing and could omit one;
+  detection is by off-chain re-run against the published inputs (Known limitations).
+- Meter readings are simulated and signed server-side; there is no external meter key yet.
+- The MockINR faucet makes the stake cheap for Sybils on a public testnet (test token by design).

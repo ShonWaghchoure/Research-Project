@@ -536,6 +536,45 @@
         {
           "type": "event",
           "anonymous": false,
+          "name": "Deregistered",
+          "inputs": [
+            {
+              "type": "address",
+              "name": "participant",
+              "indexed": true
+            },
+            {
+              "type": "bytes32",
+              "name": "meterKeyHash",
+              "indexed": true
+            },
+            {
+              "type": "uint256",
+              "name": "stakeQueued",
+              "indexed": false
+            }
+          ]
+        },
+        {
+          "type": "event",
+          "anonymous": false,
+          "name": "MeterKeyReleased",
+          "inputs": [
+            {
+              "type": "bytes32",
+              "name": "meterKeyHash",
+              "indexed": true
+            },
+            {
+              "type": "address",
+              "name": "previousOwner",
+              "indexed": true
+            }
+          ]
+        },
+        {
+          "type": "event",
+          "anonymous": false,
           "name": "MinStakeUpdated",
           "inputs": [
             {
@@ -692,6 +731,18 @@
         {
           "type": "event",
           "anonymous": false,
+          "name": "Unsuspended",
+          "inputs": [
+            {
+              "type": "address",
+              "name": "participant",
+              "indexed": true
+            }
+          ]
+        },
+        {
+          "type": "event",
+          "anonymous": false,
           "name": "WithdrawCooldownUpdated",
           "inputs": [
             {
@@ -756,6 +807,20 @@
         },
         {
           "type": "function",
+          "name": "MAX_WITHDRAW_COOLDOWN",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "uint64",
+              "name": ""
+            }
+          ]
+        },
+        {
+          "type": "function",
           "name": "OPERATOR_ROLE",
           "constant": true,
           "stateMutability": "view",
@@ -781,6 +846,14 @@
               "name": ""
             }
           ]
+        },
+        {
+          "type": "function",
+          "name": "deregister",
+          "constant": false,
+          "payable": false,
+          "inputs": [],
+          "outputs": []
         },
         {
           "type": "function",
@@ -888,6 +961,25 @@
         },
         {
           "type": "function",
+          "name": "isActive",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [
+            {
+              "type": "address",
+              "name": "account"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "bool",
+              "name": ""
+            }
+          ]
+        },
+        {
+          "type": "function",
           "name": "meterKeyOwner",
           "constant": true,
           "stateMutability": "view",
@@ -922,6 +1014,19 @@
         {
           "type": "function",
           "name": "register",
+          "constant": false,
+          "payable": false,
+          "inputs": [
+            {
+              "type": "bytes32",
+              "name": "meterKeyHash"
+            }
+          ],
+          "outputs": []
+        },
+        {
+          "type": "function",
+          "name": "releaseMeterKey",
           "constant": false,
           "payable": false,
           "inputs": [
@@ -1019,7 +1124,12 @@
               "name": "beneficiary"
             }
           ],
-          "outputs": []
+          "outputs": [
+            {
+              "type": "uint256",
+              "name": "slashed"
+            }
+          ]
         },
         {
           "type": "function",
@@ -1079,6 +1189,19 @@
               "name": ""
             }
           ]
+        },
+        {
+          "type": "function",
+          "name": "unsuspend",
+          "constant": false,
+          "payable": false,
+          "inputs": [
+            {
+              "type": "address",
+              "name": "participant"
+            }
+          ],
+          "outputs": []
         },
         {
           "type": "function",
@@ -1737,8 +1860,18 @@
               "indexed": true
             },
             {
+              "type": "address",
+              "name": "buyer",
+              "indexed": true
+            },
+            {
               "type": "uint64",
               "name": "shortfallWh",
+              "indexed": false
+            },
+            {
+              "type": "uint256",
+              "name": "refund",
               "indexed": false
             },
             {
@@ -1793,6 +1926,23 @@
         {
           "type": "event",
           "anonymous": false,
+          "name": "TreasurySwept",
+          "inputs": [
+            {
+              "type": "address",
+              "name": "to",
+              "indexed": true
+            },
+            {
+              "type": "uint256",
+              "name": "amount",
+              "indexed": false
+            }
+          ]
+        },
+        {
+          "type": "event",
+          "anonymous": false,
           "name": "Unpaused",
           "inputs": [
             {
@@ -1812,6 +1962,20 @@
           "outputs": [
             {
               "type": "bytes32",
+              "name": ""
+            }
+          ]
+        },
+        {
+          "type": "function",
+          "name": "ESCROW_LOCK_TIMEOUT",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "uint64",
               "name": ""
             }
           ]
@@ -2003,6 +2167,25 @@
         },
         {
           "type": "function",
+          "name": "escrowUnlocked",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [
+            {
+              "type": "address",
+              "name": "account"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "bool",
+              "name": ""
+            }
+          ]
+        },
+        {
+          "type": "function",
           "name": "getRoleAdmin",
           "constant": true,
           "stateMutability": "view",
@@ -2036,6 +2219,25 @@
             }
           ],
           "outputs": []
+        },
+        {
+          "type": "function",
+          "name": "hasCommitted",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [
+            {
+              "type": "address",
+              "name": ""
+            }
+          ],
+          "outputs": [
+            {
+              "type": "bool",
+              "name": ""
+            }
+          ]
         },
         {
           "type": "function",
@@ -2108,6 +2310,25 @@
             {
               "type": "uint32",
               "name": "pRefPaise"
+            }
+          ]
+        },
+        {
+          "type": "function",
+          "name": "lastCommitInterval",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [
+            {
+              "type": "address",
+              "name": ""
+            }
+          ],
+          "outputs": [
+            {
+              "type": "uint256",
+              "name": ""
             }
           ]
         },
@@ -2357,7 +2578,7 @@
               "name": ""
             },
             {
-              "type": "address",
+              "type": "bytes32",
               "name": ""
             }
           ],
@@ -2386,6 +2607,23 @@
               "name": ""
             }
           ]
+        },
+        {
+          "type": "function",
+          "name": "sweepTreasury",
+          "constant": false,
+          "payable": false,
+          "inputs": [
+            {
+              "type": "address",
+              "name": "to"
+            },
+            {
+              "type": "uint256",
+              "name": "amount"
+            }
+          ],
+          "outputs": []
         },
         {
           "type": "function",
@@ -2420,6 +2658,20 @@
           "outputs": [
             {
               "type": "bool",
+              "name": ""
+            }
+          ]
+        },
+        {
+          "type": "function",
+          "name": "treasury",
+          "constant": true,
+          "stateMutability": "view",
+          "payable": false,
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "uint256",
               "name": ""
             }
           ]
@@ -2575,5 +2827,5 @@
       ]
     }
   },
-  "updatedAt": "2026-11-14T08:39:24.390Z"
+  "updatedAt": "2026-11-14T13:41:12.643Z"
 }

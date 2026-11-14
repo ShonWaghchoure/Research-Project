@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      command: `MOCK_INTERVAL_SECONDS=60 PORT=${MOCK_PORT} node mock/server.mjs`,
+      command: `MOCK_DEV_LOGIN=1 MOCK_INTERVAL_SECONDS=60 PORT=${MOCK_PORT} node mock/server.mjs`,
       url: `http://localhost:${MOCK_PORT}/health`,
       reuseExistingServer: false,
       timeout: 30_000,

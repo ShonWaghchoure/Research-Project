@@ -54,7 +54,7 @@ export function Field({
         {unit && <span className="ml-0.5 font-normal text-text-muted">({unit})</span>}
       </Label>
       {React.isValidElement(children)
-        ? React.cloneElement(children as React.ReactElement, {
+        ? React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
             id,
             "aria-invalid": error ? true : undefined,
             "aria-describedby": [helpId, errId].filter(Boolean).join(" ") || undefined,

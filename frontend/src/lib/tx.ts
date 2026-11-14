@@ -48,6 +48,12 @@ const REVERTS: Record<string, string> = {
   "Registry: suspended": "This wallet is suspended and cannot register.",
   "Settlement: commit closed": "The commit window for this interval has closed. Wait for the next one.",
   "Settlement: insufficient escrow": "Your escrow balance is too low for this withdrawal.",
+  "Settlement: escrow locked":
+    "Escrow is locked until your current position is settled and metered. Try again after this interval.",
+  "Settlement: not active":
+    "This wallet is not active in the market: finish registration, top up your stake, or contact the operator if suspended.",
+  "Registry: cooldown": "Your stake withdrawal is still in its cooldown period.",
+  "Registry: not registered": "This wallet is not registered.",
   "Settlement: zero amount": "The amount must be greater than zero.",
   ERC20InsufficientAllowance: "Token approval was too small. Approve the amount and try again.",
   ERC20InsufficientBalance: "Not enough test INR in your wallet. Use the faucet first.",

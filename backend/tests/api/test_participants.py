@@ -34,13 +34,31 @@ def test_create_and_patch_participant(client: TestClient, seeded_db: Session):
     assert me.json()["participant"]["id"] == pid
 
     patched = client.patch(
-        f"/participants/{pid}",
-        headers=headers,
-        json={"display_name": "alice-2", "battery_kwh": 12.5},
+        f"/participants/{pid}", headers=headers, json={"display_name": "alice-2"}
     )
     assert patched.status_code == 200, patched.text
     assert patched.json()["display_name"] == "alice-2"
-    assert patched.json()["battery_kwh"] == 12.5
+
+    # Security fix: equipment and feeder node are admin-only after creation, because the
+    # false-report detector checks readings against declared capacity.
+    for field, value in (("battery_kwh", 12.5), ("pv_capacity_kw", 1000), ("feeder_node_id", "n5")):
+        r = client.patch(f"/participants/{pid}", headers=headers, json={field: value})
+        assert r.status_code == 403, (field, r.text)
+
+    admin = Account.create()
+    admin_token = login(client, seeded_db, admin.address, admin.key.hex(), UserRole.admin)
+    by_admin = client.patch(
+        f"/participants/{pid}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"battery_kwh": 12.5},
+    )
+    assert by_admin.status_code == 200, by_admin.text
+    assert by_admin.json()["battery_kwh"] == 12.5
+
+    from app.db.models import AuditLog
+
+    logs = seeded_db.query(AuditLog).filter(AuditLog.action == "participant.update").all()
+    assert {tuple(sorted(log.after)) for log in logs} == {("display_name",), ("battery_kwh",)}
 
 
 def test_validation_errors(client: TestClient, seeded_db: Session):

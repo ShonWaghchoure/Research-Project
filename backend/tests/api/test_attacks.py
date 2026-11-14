@@ -3,8 +3,8 @@ from eth_account import Account
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.schemas.attacks import ATTACK_SCENARIOS
 from app.db.models import UserRole
+from app.schemas.attacks import ATTACK_SCENARIOS
 from tests.conftest import login
 
 # Keep attack-lab API tests fast: 12 intervals, 20 participants.

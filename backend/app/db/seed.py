@@ -119,13 +119,43 @@ def seed_participants(db: Session) -> int:
     return created
 
 
+def seed_role_users(db: Session, admins: list[str], operators: list[str]) -> int:
+    """Create or promote the configured admin / operator wallets (real-network seeding)."""
+    changed = 0
+    for addresses, role in ((operators, UserRole.operator), (admins, UserRole.admin)):
+        for raw in addresses:
+            address = to_checksum_address(raw)
+            user = db.query(User).filter(User.address == address).one_or_none()
+            if user is None:
+                db.add(User(address=address, role=role, nonce_used=True))
+                changed += 1
+            elif user.role != role:
+                user.role = role
+                changed += 1
+    db.flush()
+    return changed
+
+
 def run_seed(db: Session | None = None) -> dict[str, int]:
+    from app.core.config import settings
+
     own = db is None
     session = db or SessionLocal()
     try:
         seed_feeder(session)
         seed_config(session)
-        n_part = seed_participants(session)
+        if settings.is_local_chain:
+            # Hardhat's accounts are public, which is fine on a private local node only.
+            n_part = seed_participants(session)
+        else:
+            if not settings.admin_addresses:
+                raise SystemExit(
+                    f"Refusing to seed chain {settings.CHAIN_ID}: set ADMIN_ADDRESSES to your own "
+                    "wallet(s). Hardhat demo accounts are never seeded on a public network."
+                )
+            n_part = 0
+        # Explicitly configured wallets get their roles on any chain.
+        seed_role_users(session, settings.admin_addresses, settings.operator_addresses)
         session.commit()
         n_nodes = session.query(FeederNode).count()
         n_lines = session.query(FeederLine).count()
@@ -147,9 +177,11 @@ def run_seed(db: Session | None = None) -> dict[str, int]:
 
 
 def main() -> None:
+    from app.core.config import settings
+
     stats = run_seed()
     print("seed complete:", stats)
-    if stats["participants"] < 20:
+    if settings.is_local_chain and stats["participants"] < 20:
         print("warning: expected 20 participants", file=sys.stderr)
         sys.exit(1)
 

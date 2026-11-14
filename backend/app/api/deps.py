@@ -32,6 +32,11 @@ def get_current_user(
     user = db.get(User, user_id) if user_id is not None else None
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
+    # The token must name the same wallet as the user row; a token carrying only a uid
+    # (e.g. forged for the admin's id) is rejected.
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or sub.lower() != user.address.lower():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
     return user
 
 

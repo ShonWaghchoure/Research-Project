@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple
 
@@ -34,8 +35,13 @@ class ClearingResult:
     match_status: str
 
 
+#: Absorbs float error in kWh -> Wh (e.g. 1.001 kWh * 1000 = 1000.9999999999999), which
+#: otherwise floors 1001 Wh to 1000. Far below 1 Wh, so real fractions still floor.
+_WH_EPS = 1e-6
+
+
 def _kwh_to_wh_floor(qty_kwh: float) -> int:
-    return max(0, int(qty_kwh * 1000.0))
+    return max(0, math.floor(qty_kwh * 1000.0 + _WH_EPS))
 
 
 def _wh_to_kwh(qty_wh: int) -> float:
@@ -146,8 +152,8 @@ def _largest_remainder_repair(
     floors: List[tuple[MatchTrade, int, float]] = []
     for t in float_trades:
         wh_exact = t.qty_kwh * 1000.0
-        floor = int(wh_exact)
-        frac = wh_exact - floor
+        floor = max(0, math.floor(wh_exact + _WH_EPS))
+        frac = max(0.0, wh_exact - floor)
         floors.append((t, floor, frac))
 
     buyer_used = {pid: 0 for pid in buyer_cap}

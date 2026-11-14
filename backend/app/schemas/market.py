@@ -21,15 +21,25 @@ class IntervalOut(BaseModel):
     engine_version: Optional[str] = None
 
 
+#: Hard ceiling (1 MWh, ₹1000/kWh): keeps every value inside the int32 DB columns.
+MAX_POSITION_WH = 1_000_000
+MAX_PRICE_PAISE = 100_000
+
+
 class PositionCreate(BaseModel):
     side: Literal["buy", "sell"]
-    qty_wh: int = Field(..., gt=0)
-    limit_price_paise: int = Field(..., gt=0)
-    deadline: Optional[int] = None  # unix seconds; default = interval ends_at
+    qty_wh: int = Field(..., gt=0, le=MAX_POSITION_WH)
+    limit_price_paise: int = Field(..., gt=0, le=MAX_PRICE_PAISE)
+    deadline: Optional[int] = Field(None, ge=0, le=2**31 - 1)  # unix s; default interval end
+    # The browser generates the salt (docs/DECISIONS.md, Phase 8 #4) so it can check the
+    # commit hash itself. When omitted, the server generates one.
+    salt: Optional[str] = Field(None, pattern=r"^0x[0-9a-fA-F]{64}$")
 
 
 class CommitData(BaseModel):
     position_id: int
+    #: Same as position_id; the frontend's Position type uses `id`.
+    id: int
     interval_id: int
     commit_hash: str
     salt: str

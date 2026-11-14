@@ -55,7 +55,8 @@ def tick(client: ChainClient | None = None) -> None:
                     hx = raw_hx.hex() if hasattr(raw_hx, "hex") else str(raw_hx)
                     # Canonical 0x form for Transaction matching (String(66)).
                     tx_hash = hx if hx.startswith("0x") else "0x" + hx
-                _upsert_event(db, name, tx_hash, dict(ev.get("args") or {}))
+                log_index = int(ev.get("logIndex") or 0)
+                _upsert_event(db, name, tx_hash, dict(ev.get("args") or {}), log_index)
                 if tx_hash:
                     _mark_tx_confirmed(db, tx_hash)
 
@@ -71,9 +72,18 @@ def tick(client: ChainClient | None = None) -> None:
         db.close()
 
 
-def _upsert_event(db: Session, name: str, tx_hash: str | None, args: dict) -> None:
-    # audit_log.resource_id is varchar(64) — store bare hex (64 chars), not 0x-prefixed.
-    resource_id = (tx_hash.removeprefix("0x") if tx_hash else name)[:64]
+def _event_resource_id(name: str, tx_hash: str | None, log_index: int) -> str:
+    """Unique per log, not per transaction: one settleBatch emits up to 10 TradeSettled
+    events with the same tx hash, and keying on the hash alone kept only the first.
+    audit_log.resource_id is varchar(64): 56 hex chars of the hash (224 bits) + ':' + index."""
+    base = tx_hash.removeprefix("0x")[:56] if tx_hash else name[:56]
+    return f"{base}:{log_index}"[:64]
+
+
+def _upsert_event(
+    db: Session, name: str, tx_hash: str | None, args: dict, log_index: int = 0
+) -> None:
+    resource_id = _event_resource_id(name, tx_hash, log_index)
     existing = (
         db.query(AuditLog)
         .filter(
@@ -91,7 +101,11 @@ def _upsert_event(db: Session, name: str, tx_hash: str | None, args: dict) -> No
             action=f"chain:{name}",
             resource_type="chain_event",
             resource_id=resource_id,
-            after={"args": {k: str(v) for k, v in args.items()}, "tx_hash": tx_hash},
+            after={
+                "args": {k: str(v) for k, v in args.items()},
+                "tx_hash": tx_hash,
+                "log_index": log_index,
+            },
         )
     )
 

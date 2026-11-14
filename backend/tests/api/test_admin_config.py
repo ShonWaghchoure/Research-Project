@@ -60,3 +60,37 @@ def test_admin_config_get_put_and_audit(
 
 def test_unauthenticated_admin_rejected(client: TestClient, seeded_db: Session):
     assert client.get("/admin/config").status_code == 401
+
+
+def test_admin_config_rejects_values_that_would_break_the_engine(
+    client: TestClient, seeded_db: Session, admin_account: tuple[str, str]
+):
+    """Security/robustness fix: bad config used to be stored and then crash or misprice
+    every interval. Each of these must be refused with a 422 and leave config unchanged."""
+    addr, pk = admin_account
+    token = login(client, seeded_db, addr, pk, UserRole.admin)
+    h = {"Authorization": f"Bearer {token}"}
+    before = client.get("/admin/config", headers=h).json()["values"]
+    for bad in (
+        {"k": "x"},
+        {"p_fit": 900},
+        {"p_fit": 800},  # not below p_ret
+        {"p_ret": 900},  # above the contract's immutable retail ceiling
+        {"beta": -1},
+        {"beta": 100},  # > 5% of the band
+        {"alpha": 0},
+        {"k": 2.5},
+        {"w_del": 0.9},  # weights no longer sum to 1
+        {"no_such_setting": 1},
+        {"alpha": True},
+    ):
+        r = client.put("/admin/config", json={"values": bad}, headers=h)
+        assert r.status_code == 422, (bad, r.text)
+    assert client.get("/admin/config", headers=h).json()["values"] == before
+
+    ok = client.put(
+        "/admin/config",
+        json={"values": {"w_del": 0.4, "w_rev": 0.2}},  # still sums to 1
+        headers=h,
+    )
+    assert ok.status_code == 200, ok.text

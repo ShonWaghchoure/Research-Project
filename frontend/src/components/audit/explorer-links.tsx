@@ -1,5 +1,16 @@
 "use client";
 
+/** Only https links from the API are rendered; React does not block javascript: hrefs. */
+export function safeHttpsUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ExplorerLinks({
   explorer,
 }: {
@@ -8,7 +19,7 @@ export function ExplorerLinks({
   const network = explorer.network ?? "—";
   const settlement = explorer.settlement;
   const hint = explorer.interval_hint;
-  const url = explorer.block_explorer;
+  const url = safeHttpsUrl(explorer.block_explorer);
 
   return (
     <dl className="grid gap-1 text-sm sm:grid-cols-2">

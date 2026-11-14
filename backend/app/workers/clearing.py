@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import asdict
 from typing import Optional
 
 import structlog
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from app.chain.client import ChainClient, get_chain_client
+from app.core.config import settings
 from app.core.config_store import load_market_params
 from app.db.models import (
     Interval,
@@ -18,6 +21,7 @@ from app.db.models import (
     ReputationEvent,
     ReputationScore,
     Trade,
+    User,
 )
 from app.engine.clearing import clear_interval
 from app.engine.pricing import Position as EngPosition
@@ -59,7 +63,61 @@ def _latest_rep(db: Session, participant_id: int) -> tuple[BetaState, Tier | Non
     return BetaState(alpha=row.alpha, beta=row.beta, evidence_count=row.evidence_count), prev
 
 
-def run(db: Session, interval: Interval) -> None:
+def _escrow_caps_wh(
+    db: Session, positions: list[Position], client: ChainClient
+) -> dict[int, int]:
+    """Most Wh each buyer's on-chain escrow can pay for at their limit price (the clearing
+    price never exceeds a buyer's limit). settleBatch reverts the whole batch if any buyer
+    is short, so an unfunded buyer would otherwise block every other trade with them."""
+    caps: dict[int, int] = {}
+    if settings.testing and not _reachable(client):
+        return caps
+    for pos in positions:
+        if pos.side != PositionSide.buy or pos.limit_price_paise <= 0:
+            continue
+        part = db.get(Participant, pos.participant_id)
+        user = db.get(User, part.user_id) if part is not None else None
+        if user is None:
+            caps[pos.id] = 0
+            continue
+        escrow = int(client.settlement.functions.escrow(user.address).call())
+        # Settlement pays floor(qty_wh * price / 1000); this is the largest qty it covers.
+        caps[pos.id] = (escrow * 1000) // pos.limit_price_paise
+    return caps
+
+
+def _reachable(client: ChainClient) -> bool:
+    try:
+        return bool(client.is_reachable())
+    except Exception:
+        return False
+
+
+def _with_onchain_commit(
+    db: Session, interval: Interval, positions: list[Position], client: ChainClient
+) -> tuple[list[Position], list[Position]]:
+    """Split revealed positions into (committed on chain with the same hash, everything
+    else). The DB `revealed` flag alone is not proof of a sealed bid: a bot whose
+    commitPosition reverted, or a reveal accepted while the chain was unreachable, would
+    otherwise be cleared and settled without any on-chain commitment."""
+    if not _reachable(client):
+        if settings.testing:
+            return positions, []
+        raise RuntimeError("chain unreachable; clearing waits for it")
+    kept: list[Position] = []
+    rejected: list[Position] = []
+    for pos in positions:
+        part = db.get(Participant, pos.participant_id)
+        user = db.get(User, part.user_id) if part is not None else None
+        onchain = client.on_chain_commit(interval.id, user.address) if user is not None else None
+        if onchain and pos.commit_hash and onchain.lower() == pos.commit_hash.lower():
+            kept.append(pos)
+        else:
+            rejected.append(pos)
+    return kept, rejected
+
+
+def run(db: Session, interval: Interval, client: ChainClient | None = None) -> None:
     """Clear revealed positions; idempotent if trades already stored."""
     existing = db.query(Trade).filter(Trade.interval_id == interval.id).count()
     if existing > 0 and interval.result_hash:
@@ -68,11 +126,20 @@ def run(db: Session, interval: Interval) -> None:
 
     params = load_market_params(db)
     feeder = load_feeder(db)
-    positions = (
+    revealed = (
         db.query(Position)
         .filter(Position.interval_id == interval.id, Position.revealed.is_(True))
         .all()
     )
+    chain = client or get_chain_client()
+    positions, not_committed = _with_onchain_commit(db, interval, revealed, chain)
+    escrow_cap_wh = _escrow_caps_wh(db, positions, chain)
+    if not_committed:
+        logger.warning(
+            "clearing_dropped_uncommitted",
+            interval_id=interval.id,
+            position_ids=[p.id for p in not_committed],
+        )
 
     eng_positions: list[EngPosition] = []
     for pos in positions:
@@ -82,7 +149,18 @@ def run(db: Session, interval: Interval) -> None:
         state, prev_tier = _latest_rep(db, pos.participant_id)
         tier = classify(state, prev_tier=prev_tier)
         r_match = matching_reputation(state, tier)
-        qty_kwh = pos.qty_wh / 1000.0
+        qty_wh = pos.qty_wh
+        if pos.id in escrow_cap_wh and escrow_cap_wh[pos.id] < qty_wh:
+            logger.warning(
+                "clearing_buy_capped_by_escrow",
+                position_id=pos.id,
+                requested_wh=qty_wh,
+                fundable_wh=escrow_cap_wh[pos.id],
+            )
+            qty_wh = escrow_cap_wh[pos.id]
+        if qty_wh <= 0:
+            continue
+        qty_kwh = qty_wh / 1000.0
         # Apply volume cap for probation etc.
         r_true = reputation(state)
         cap = volume_cap_kwh(qty_kwh, r_true)
@@ -109,6 +187,11 @@ def run(db: Session, interval: Interval) -> None:
         prev_p = float(prev_iv.p_ref_paise)
 
     result = clear_interval(eng_positions, feeder, params, prev_p)
+    interval.clearing_inputs = {
+        "params": asdict(params),
+        "prev_p_ref": prev_p,
+        "positions": [asdict(p) for p in eng_positions],
+    }
 
     # Replace any partial trades
     db.query(Trade).filter(Trade.interval_id == interval.id).delete()
@@ -139,7 +222,7 @@ def run(db: Session, interval: Interval) -> None:
         )
         .all()
     )
-    for pos in unrevealed:
+    for pos in [*unrevealed, *not_committed]:
         exists = (
             db.query(ReputationEvent)
             .filter(
@@ -155,7 +238,10 @@ def run(db: Session, interval: Interval) -> None:
                     interval_id=interval.id,
                     participant_id=pos.participant_id,
                     event_type="reveal_miss",
-                    payload={"position_id": pos.id},
+                    payload={
+                        "position_id": pos.id,
+                        "reason": "no matching on-chain commit" if pos.revealed else "not revealed",
+                    },
                 )
             )
 

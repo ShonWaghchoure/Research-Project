@@ -41,8 +41,13 @@ MAX_REQUEST_BYTES = 1_048_576  # 1 MiB
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > MAX_REQUEST_BYTES:
-            return Response("request body too large", status_code=413)
+        if content_length:
+            try:
+                size = int(content_length)
+            except ValueError:
+                return Response("invalid content-length", status_code=400)
+            if size > MAX_REQUEST_BYTES:
+                return Response("request body too large", status_code=413)
         return await call_next(request)
 
 
@@ -121,7 +126,7 @@ def health_check(request: Request) -> Dict[str, Any]:
             postgres_status = "ok"
     except Exception as exc:
         logger.warning("postgres_ping_failed", error=str(exc))
-        postgres_status = f"unreachable: {exc}"
+        postgres_status = "unreachable"  # details are logged, not returned
 
     redis_status = "error"
     try:
@@ -135,7 +140,7 @@ def health_check(request: Request) -> Dict[str, Any]:
         r.close()
     except Exception as exc:
         logger.warning("redis_ping_failed", error=str(exc))
-        redis_status = f"unreachable: {exc}"
+        redis_status = "unreachable"  # details are logged, not returned
 
     block_number = None
     rpc_status = "error"
@@ -148,7 +153,7 @@ def health_check(request: Request) -> Dict[str, Any]:
             rpc_status = "disconnected"
     except Exception as exc:
         logger.warning("rpc_ping_failed", error=str(exc))
-        rpc_status = f"unreachable: {exc}"
+        rpc_status = "unreachable"  # details are logged, not returned
 
     is_all_ok = (
         postgres_status == "ok"

@@ -27,8 +27,8 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const initialState = cookieToInitialState(config, headers().get("cookie"));
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const initialState = cookieToInitialState(config, (await headers()).get("cookie"));
   return (
     <html lang="en" suppressHydrationWarning className={`${inter.variable} ${serif.variable}`}>
       <body>

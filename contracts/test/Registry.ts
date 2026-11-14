@@ -117,4 +117,53 @@ describe("Registry", function () {
       .withArgs(3600);
     expect(await registry.withdrawCooldown()).to.equal(3600);
   });
+
+  it("deregister frees the meter key and queues the whole stake (nothing locked forever)", async function () {
+    const { token, registry, settlement, users } = await deploySystem();
+    const [a, b] = users;
+    const key = ethers.id("meter-dereg");
+    await registerParticipant(token, registry, settlement, a, key, MIN_STAKE + 5_000n);
+    await expect(registry.connect(a).deregister())
+      .to.emit(registry, "Deregistered")
+      .withArgs(a.address, key, MIN_STAKE + 5_000n);
+    const p = await registry.getParticipant(a.address);
+    expect(p.registered).to.equal(false);
+    expect(p.stake).to.equal(0n);
+    expect(p.pendingWithdraw).to.equal(MIN_STAKE + 5_000n);
+    expect(await registry.meterKeyOwner(key)).to.equal(ethers.ZeroAddress);
+    // The key can now be registered by someone else, and the stake is withdrawable after cooldown.
+    await registerParticipant(token, registry, settlement, b, key);
+    await time.increase(Number(COOLDOWN));
+    await registry.connect(a).withdraw();
+    expect((await registry.getParticipant(a.address)).pendingWithdraw).to.equal(0n);
+  });
+
+  it("admin can release a squatted meter key and lift a suspension", async function () {
+    const { token, registry, settlement, admin, operator, users } = await deploySystem();
+    const [squatter, owner] = users;
+    const key = ethers.id("victim-meter");
+    await registerParticipant(token, registry, settlement, squatter, key);
+    await expect(registry.connect(squatter).releaseMeterKey(key)).to.be.revertedWithCustomError(
+      registry,
+      "AccessControlUnauthorizedAccount"
+    );
+    await expect(registry.connect(admin).releaseMeterKey(key))
+      .to.emit(registry, "MeterKeyReleased")
+      .withArgs(key, squatter.address);
+    expect((await registry.getParticipant(squatter.address)).registered).to.equal(false);
+    await registerParticipant(token, registry, settlement, owner, key);
+
+    await registry.connect(operator).suspend(owner.address);
+    expect(await registry.isActive(owner.address)).to.equal(false);
+    await expect(registry.connect(admin).unsuspend(owner.address)).to.emit(registry, "Unsuspended");
+    expect(await registry.isActive(owner.address)).to.equal(true);
+  });
+
+  it("withdraw cooldown is bounded so requestWithdraw cannot overflow", async function () {
+    const { registry, admin } = await deploySystem();
+    await expect(registry.connect(admin).setWithdrawCooldown(2n ** 63n)).to.be.revertedWith(
+      "Registry: cooldown too long"
+    );
+    await registry.connect(admin).setWithdrawCooldown(365 * 24 * 3600);
+  });
 });

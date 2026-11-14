@@ -51,11 +51,17 @@ export function reputationLeaf(participant: string, scoreBp: number, evidenceCou
   );
 }
 
-export function shortfallLeaf(intervalId: number | bigint, participant: string, shortfallWh: number | bigint): string {
+/** Leaf for one (seller, buyer) shortfall: keccak256(abi.encode(id, seller, buyer, shortfallWh)). */
+export function shortfallLeaf(
+  intervalId: number | bigint,
+  seller: string,
+  buyer: string,
+  shortfallWh: number | bigint
+): string {
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
-      ["uint256", "address", "uint64"],
-      [intervalId, participant, shortfallWh]
+      ["uint256", "address", "address", "uint64"],
+      [intervalId, seller, buyer, shortfallWh]
     )
   );
 }

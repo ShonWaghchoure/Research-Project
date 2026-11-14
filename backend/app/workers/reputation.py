@@ -49,7 +49,8 @@ def _prev_score(db: Session, participant_id: int, before_interval_id: int) -> Re
     )
 
 
-def run(db: Session, interval: Interval, client: ChainClient | None = None) -> None:
+def run(db: Session, interval: Interval, client: ChainClient | None = None) -> bool:
+    """Returns True once the reputation root is confirmed on chain (or nothing to anchor)."""
     client = client or get_chain_client()
 
     existing = (
@@ -73,9 +74,10 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
                 try:
                     client.post_reputation_root(interval.id, root, db=db)
                 except Exception as exc:
-                    logger.info("rep_root_already_or_failed", error=str(exc))
+                    logger.warning("rep_root_post_failed", interval_id=interval.id, error=str(exc))
+                    return False
             logger.info("reputation_skip_scores_exist", interval_id=interval.id)
-            return
+            return True
 
     participants = (
         db.query(Participant)
@@ -182,7 +184,7 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
     if not leaves:
         logger.warning("reputation_no_participants", interval_id=interval.id)
         db.commit()
-        return
+        return True
 
     tree = build_tree(leaves)
     db.commit()
@@ -196,3 +198,4 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
         }
     )
     logger.info("reputation_done", interval_id=interval.id, root=tree.root, n=len(leaves))
+    return True

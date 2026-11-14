@@ -45,6 +45,15 @@ def db() -> Session:
         connection.close()
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limits() -> None:
+    """Rate limits are per process; without a reset, later tests inherit earlier tests'
+    login count and get 429s depending on test order."""
+    from app.core.limiter import limiter
+
+    limiter.reset()
+
+
 @pytest.fixture()
 def client(db: Session) -> TestClient:
     def _override():  # type: ignore[no-untyped-def]

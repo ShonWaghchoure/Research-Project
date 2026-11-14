@@ -10,11 +10,13 @@ from typing import Any, Optional
 import structlog
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
+from eth_typing import HexStr
 from eth_utils import to_checksum_address
 from hexbytes import HexBytes
 from sqlalchemy.orm import Session
 from web3 import Web3
 from web3.contract.contract import Contract
+from web3.exceptions import TransactionNotFound
 from web3.types import TxParams
 
 from app.chain.deployments import DeploymentBundle, load_deployments
@@ -23,6 +25,14 @@ from app.db.models import Transaction, TxStatus
 from app.db.session import SessionLocal
 
 logger = structlog.get_logger(__name__)
+
+
+class TxReverted(RuntimeError):
+    """The transaction was mined but reverted; nothing changed on chain."""
+
+
+class TxNotConfirmed(RuntimeError):
+    """The transaction was broadcast but not mined in time; it may still confirm."""
 
 BuildFn = Callable[[Contract], Any]  # returns a ContractFunction
 
@@ -161,20 +171,29 @@ class ChainClient:
             if existing is not None:
                 if existing.status == TxStatus.confirmed:
                     # Hardhat restarts wipe chain state while DB rows remain; only
-                    # skip re-send when the receipt still exists on the live RPC.
-                    if existing.tx_hash and self._tx_still_on_chain(existing.tx_hash):
+                    # re-send when the node definitely no longer knows the tx. An RPC
+                    # error raises instead: re-sending a confirmed tx on a flaky
+                    # connection would execute it twice (e.g. a double mint).
+                    state = self._tx_state(existing.tx_hash) if existing.tx_hash else "missing"
+                    if state == "success":
+                        return existing
+                    if state == "pending":
+                        self._await_and_finalize(session, existing)
                         return existing
                     logger.warning(
                         "idempotent_tx_missing_on_chain",
                         key=idempotency_key,
                         tx=existing.tx_hash,
+                        state=state,
                     )
                     existing.status = TxStatus.pending
                     existing.error = "receipt missing after chain reset"
                     existing.tx_hash = None
                     session.commit()
                 elif existing.status == TxStatus.submitted and existing.tx_hash:
-                    if self._tx_still_on_chain(existing.tx_hash):
+                    state = self._tx_state(existing.tx_hash)
+                    if state in ("success", "reverted", "pending"):
+                        # Still in the mempool or already mined: wait, never re-send.
                         self._await_and_finalize(session, existing)
                         return existing
                     existing.status = TxStatus.pending
@@ -211,6 +230,10 @@ class ChainClient:
             return row
         except Exception as exc:
             logger.exception("send_tx_failed", method=method, key=idempotency_key)
+            if isinstance(exc, TxNotConfirmed):
+                # Broadcast but not yet mined: keep it "submitted" so the next call waits
+                # for it instead of re-sending with a new nonce.
+                raise
             try:
                 row2 = (
                     session.query(Transaction)
@@ -231,19 +254,22 @@ class ChainClient:
     def _sign_and_send(self, account: LocalAccount, fn: Any, *, value: int = 0) -> str:
         addr = to_checksum_address(account.address)
         nonce = self.nonces.next(addr)
-        tx: TxParams = fn.build_transaction(
-            {
-                "from": addr,
-                "nonce": nonce,
-                "chainId": self.chain_id,
-                "gas": 3_000_000,
-                "gasPrice": self.w3.eth.gas_price,
-                "value": value,
-            }
-        )
-        signed = account.sign_transaction(tx)
-        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+        # Release the nonce on *any* failure before broadcast (gas price lookup, build,
+        # sign, send). Otherwise a consumed-but-unused nonce leaves a gap and every later
+        # operator tx queues behind it on a real network.
         try:
+            tx: TxParams = fn.build_transaction(
+                {
+                    "from": addr,
+                    "nonce": nonce,
+                    "chainId": self.chain_id,
+                    "gas": 3_000_000,
+                    "gasPrice": self.w3.eth.gas_price,
+                    "value": value,
+                }
+            )
+            signed = account.sign_transaction(tx)
+            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
             tx_hash = self.w3.eth.send_raw_transaction(raw)
         except Exception:
             self.nonces.reset(addr)
@@ -251,36 +277,49 @@ class ChainClient:
         # hexbytes 2.x returns bare hex; always store canonical 0x form.
         return _norm_hex(HexBytes(tx_hash).hex())
 
-    def _tx_still_on_chain(self, tx_hash: str) -> bool:
-        """Return True if ``tx_hash`` has a receipt on the current RPC."""
+    def _tx_state(self, tx_hash: str) -> str:
+        """'success' | 'reverted' (mined), 'pending' (known, not mined), or 'missing'
+        (the node has never heard of it, e.g. after a Hardhat restart). RPC errors raise:
+        "could not check" must never be read as "missing", or the tx gets re-sent."""
+        hx = HexStr(_norm_hex(tx_hash))
         try:
-            receipt = self.w3.eth.get_transaction_receipt(_norm_hex(tx_hash))
-            return receipt is not None and int(receipt.get("status", 0)) == 1
-        except Exception:
-            return False
+            receipt = self.w3.eth.get_transaction_receipt(hx)
+        except TransactionNotFound:
+            receipt = None
+        if receipt is not None:
+            return "success" if int(receipt.get("status", 0)) == 1 else "reverted"
+        try:
+            self.w3.eth.get_transaction(hx)
+        except TransactionNotFound:
+            return "missing"
+        return "pending"
 
     def _await_and_finalize(self, session: Session, row: Transaction) -> None:
+        """Wait for the receipt. Raises TxReverted on revert and TxNotConfirmed if it is
+        not mined in time, so callers never treat a failed write as done."""
         if not row.tx_hash:
             return
+        hx = _norm_hex(row.tx_hash)
+        if row.tx_hash != hx:
+            row.tx_hash = hx
+            session.commit()
         try:
-            hx = _norm_hex(row.tx_hash)
-            if row.tx_hash != hx:
-                row.tx_hash = hx
-                session.commit()
             receipt = self.w3.eth.wait_for_transaction_receipt(hx, timeout=120)
             target = int(receipt["blockNumber"]) + max(0, self.confirmations - 1)
             while int(self.w3.eth.block_number) < target:
                 time.sleep(0.05)
-            if int(receipt.get("status", 0)) != 1:
-                row.status = TxStatus.failed
-                row.error = "transaction reverted"
-            else:
-                row.status = TxStatus.confirmed
-                row.error = None
-            session.commit()
         except Exception as exc:
             logger.warning("await_receipt_failed", tx=row.tx_hash, error=str(exc))
             # Leave as submitted for restart reconciliation.
+            raise TxNotConfirmed(f"{row.method} {hx} not confirmed: {exc}") from exc
+        if int(receipt.get("status", 0)) != 1:
+            row.status = TxStatus.failed
+            row.error = "transaction reverted"
+            session.commit()
+            raise TxReverted(f"{row.method} reverted ({hx})")
+        row.status = TxStatus.confirmed
+        row.error = None
+        session.commit()
 
     # --- Settlement helpers -------------------------------------------------
 
@@ -326,7 +365,7 @@ class ChainClient:
         self,
         interval_id: int,
         trades: list[tuple[str, str, int, int]],
-        batch_index: int,
+        batch_index: int | str,
         *,
         db: Session | None = None,
     ) -> Transaction:
@@ -368,7 +407,7 @@ class ChainClient:
         proof_bytes = [_to_bytes32(p) for p in proof]
         return self.send_operator_tx(
             "settleShortfall",
-            f"settle:{interval_id}:shortfall:{participant.lower()}",
+            f"settle:{interval_id}:shortfall:{participant.lower()}:{buyer.lower()}",
             lambda c: c.functions.settleShortfall(
                 int(interval_id),
                 to_checksum_address(participant),

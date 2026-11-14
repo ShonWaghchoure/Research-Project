@@ -34,6 +34,13 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
     /// @notice Retail tariff (paise/kWh) used for shortfall compensation.
     uint32 public immutable pRetPaise;
 
+    /// @notice How long after the reveal deadline escrow stays locked if the operator never
+    ///         posts delivery (escape hatch so funds cannot be frozen forever).
+    uint64 public constant ESCROW_LOCK_TIMEOUT = 1 days;
+
+    /// @notice Shortfall penalties collected (paise), held separately from user escrow.
+    uint256 public treasury;
+
     struct Interval {
         uint64 commitDeadline;
         uint64 revealDeadline;
@@ -58,8 +65,11 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
     mapping(address => uint256) public escrow;
     /// @dev intervalId => tradeKey => settled
     mapping(uint256 => mapping(bytes32 => bool)) public tradeSettled;
-    /// @dev intervalId => participant => shortfall settled
-    mapping(uint256 => mapping(address => bool)) public shortfallSettled;
+    /// @dev intervalId => keccak256(seller, buyer) => shortfall settled
+    mapping(uint256 => mapping(bytes32 => bool)) public shortfallSettled;
+    /// @dev Last interval each account committed in; escrow is locked until it is settled.
+    mapping(address => uint256) public lastCommitInterval;
+    mapping(address => bool) public hasCommitted;
 
     event IntervalOpened(uint256 indexed id, uint64 commitDeadline, uint64 revealDeadline);
     event PositionCommitted(uint256 indexed id, address indexed participant, bytes32 commitHash);
@@ -73,10 +83,13 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
     event ShortfallSettled(
         uint256 indexed id,
         address indexed participant,
+        address indexed buyer,
         uint64 shortfallWh,
+        uint256 refund,
         uint256 compensation,
         uint256 penalty
     );
+    event TreasurySwept(address indexed to, uint256 amount);
 
     /**
      * @param token_ MockINR token.
@@ -157,7 +170,12 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
         require(block.timestamp < iv.commitDeadline, "Settlement: commit closed");
         require(commitHash != bytes32(0), "Settlement: empty commit");
         require(commits[id][msg.sender] == bytes32(0), "Settlement: already committed");
+        // Staking only deters Sybils and backs shortfalls if it is enforced here, not just
+        // off-chain: suspended, unregistered or under-staked accounts cannot commit.
+        require(registry.isActive(msg.sender), "Settlement: not active");
         commits[id][msg.sender] = commitHash;
+        lastCommitInterval[msg.sender] = id;
+        hasCommitted[msg.sender] = true;
         emit PositionCommitted(id, msg.sender, commitHash);
     }
 
@@ -176,12 +194,26 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
      * @notice Withdraw unused escrow back to the caller.
      * @param amount Paise to withdraw.
      */
-    function withdrawEscrow(uint256 amount) external nonReentrant whenNotPaused {
+    function withdrawEscrow(uint256 amount) external nonReentrant {
         require(amount > 0, "Settlement: zero amount");
         require(escrow[msg.sender] >= amount, "Settlement: insufficient escrow");
+        // A buyer could otherwise commit, see the price, then pull escrow before settleBatch
+        // and default for free (also reverting everyone else's batch). Escrow unlocks once
+        // the interval's delivery is posted, or after a timeout if it never is.
+        // Not gated by pause, so an admin pause cannot freeze user funds indefinitely.
+        require(escrowUnlocked(msg.sender), "Settlement: escrow locked");
         escrow[msg.sender] -= amount;
         token.safeTransfer(msg.sender, amount);
         emit EscrowWithdrawn(msg.sender, amount, escrow[msg.sender]);
+    }
+
+    /**
+     * @notice Whether `account` may withdraw escrow now (no unsettled committed interval).
+     */
+    function escrowUnlocked(address account) public view returns (bool) {
+        if (!hasCommitted[account]) return true;
+        Interval storage iv = intervals[lastCommitInterval[account]];
+        return iv.deliveryPosted || block.timestamp > uint256(iv.revealDeadline) + ESCROW_LOCK_TIMEOUT;
     }
 
     /**
@@ -229,6 +261,14 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
             require(t.qtyWh > 0, "Settlement: zero qty");
             require(t.buyer != address(0) && t.seller != address(0), "Settlement: parties");
             require(t.buyer != t.seller, "Settlement: self trade");
+            // Only parties who committed in this interval can trade in it, so an operator key
+            // cannot move escrow from an account that never took part.
+            require(
+                commits[id][t.buyer] != bytes32(0) && commits[id][t.seller] != bytes32(0),
+                "Settlement: party not committed"
+            );
+            // The engine emits one trade per (buyer, seller) per interval; keying on the pair
+            // (not qty) stops the same match being settled again with a different quantity.
             bytes32 key = _tradeKey(t);
             require(!tradeSettled[id][key], "Settlement: already settled");
             uint256 payment = _payment(t.qtyWh, t.pricePaise);
@@ -260,15 +300,22 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
     }
 
     /**
-     * @notice Settle a Merkle-proved shortfall: compensation + penalty from seller stake.
-     * @dev Leaf = keccak256(abi.encode(intervalId, participant, shortfallWh)).
-     *      compensation = shortfallWh * (pRet - pRef) / 1000
-     *      penalty = shortfallWh * pRef * PENALTY_NUM / (1000 * PENALTY_DEN)
+     * @notice Settle a Merkle-proved shortfall between one seller and one buyer from the
+     *         seller's stake.
+     * @dev Leaf = keccak256(abi.encode(intervalId, seller, buyer, shortfallWh)), one per
+     *      (seller, buyer) pair, so every short-changed buyer is compensated.
+     *      settleBatch charged the buyer for the full promised quantity, so the buyer first
+     *      gets back what it paid for the undelivered energy, then the spec's compensation:
+     *        refund       = shortfallWh * pRef / 1000
+     *        compensation = shortfallWh * (pRet - pRef) / 1000
+     *        penalty      = shortfallWh * pRef * f / 1000        (to treasury)
+     *      The buyer ends up paying exactly pRef for what it was promised (spec, Phase 3).
+     *      If the stake cannot cover everything, the buyer is paid first; nothing reverts.
      * @param id Interval id.
      * @param participant Under-delivering seller.
-     * @param shortfallWh Undelivered Wh.
+     * @param shortfallWh Undelivered Wh to this buyer.
      * @param proof Merkle proof against deliveryRoot.
-     * @param buyer Compensation recipient (the counterparty buyer).
+     * @param buyer The short-changed buyer (part of the proven leaf).
      */
     function settleShortfall(
         uint256 id,
@@ -281,26 +328,44 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
         require(iv.deliveryPosted, "Settlement: no delivery");
         require(shortfallWh > 0, "Settlement: zero shortfall");
         require(participant != address(0) && buyer != address(0), "Settlement: parties");
-        require(!shortfallSettled[id][participant], "Settlement: shortfall done");
+        require(participant != buyer, "Settlement: self trade");
+        bytes32 pairKey = keccak256(abi.encode(participant, buyer));
+        require(!shortfallSettled[id][pairKey], "Settlement: shortfall done");
 
-        bytes32 leaf = keccak256(abi.encode(id, participant, shortfallWh));
+        bytes32 leaf = keccak256(abi.encode(id, participant, buyer, shortfallWh));
         require(MerkleProof.verify(proof, iv.deliveryRoot, leaf), "Settlement: bad proof");
 
-        shortfallSettled[id][participant] = true;
+        shortfallSettled[id][pairKey] = true;
+        _payShortfall(id, participant, buyer, shortfallWh, iv.pRefPaise);
+    }
 
-        uint256 compensation = (uint256(shortfallWh) * uint256(pRetPaise - iv.pRefPaise)) / 1000;
-        uint256 penalty =
-            (uint256(shortfallWh) * uint256(iv.pRefPaise) * PENALTY_NUM) / (1000 * PENALTY_DEN);
-        uint256 totalSlash = compensation + penalty;
-        require(totalSlash > 0, "Settlement: zero slash");
+    function _payShortfall(uint256 id, address seller, address buyer, uint64 shortfallWh, uint32 pRef) internal {
+        uint256 refund = (uint256(shortfallWh) * uint256(pRef)) / 1000;
+        uint256 compensation = (uint256(shortfallWh) * uint256(pRetPaise - pRef)) / 1000;
+        uint256 penalty = (uint256(shortfallWh) * uint256(pRef) * PENALTY_NUM) / (1000 * PENALTY_DEN);
+        uint256 toBuyer = refund + compensation;
 
-        registry.slash(participant, totalSlash, address(this));
-        if (compensation > 0) {
-            token.safeTransfer(buyer, compensation);
+        // A shortfall too small to cost a whole paisa is recorded but moves nothing
+        // (previously it reverted "zero slash" and could never be settled).
+        uint256 slashed = (toBuyer + penalty) > 0 ? registry.slash(seller, toBuyer + penalty, address(this)) : 0;
+        uint256 paid = slashed < toBuyer ? slashed : toBuyer;
+        if (paid > 0) {
+            token.safeTransfer(buyer, paid);
         }
-        // Penalty tokens remain in this contract (protocol treasury).
+        treasury += slashed - paid;
 
-        emit ShortfallSettled(id, participant, shortfallWh, compensation, penalty);
+        emit ShortfallSettled(id, seller, buyer, shortfallWh, refund, compensation, penalty);
+    }
+
+    /**
+     * @notice Move collected penalties out of the contract (admin). Cannot touch user escrow.
+     */
+    function sweepTreasury(address to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        require(to != address(0), "Settlement: to");
+        require(amount > 0 && amount <= treasury, "Settlement: amount");
+        treasury -= amount;
+        token.safeTransfer(to, amount);
+        emit TreasurySwept(to, amount);
     }
 
     /**
@@ -330,6 +395,6 @@ contract Settlement is AccessControl, Pausable, ReentrancyGuard {
     }
 
     function _tradeKey(Trade calldata t) internal pure returns (bytes32) {
-        return keccak256(abi.encode(t.buyer, t.seller, t.qtyWh, t.pricePaise));
+        return keccak256(abi.encode(t.buyer, t.seller));
     }
 }

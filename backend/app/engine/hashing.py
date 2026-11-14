@@ -46,18 +46,22 @@ def input_root(positions: Sequence[Any]) -> str:
 
 
 def _trade_record(trade: Any) -> dict[str, Any]:
+    # Integers only, exactly as stored in the DB and posted on chain (price is paise/kWh,
+    # rounded like p_ref). Hashing the solver's float price made the posted result hash
+    # impossible to reproduce from published trades. IDs are strings so DB rows (int ids)
+    # and engine trades (str ids) hash identically.
     return {
-        "buyer_id": trade.buyer_id,
-        "seller_id": trade.seller_id,
+        "buyer_id": str(trade.buyer_id),
+        "seller_id": str(trade.seller_id),
         "qty_wh": int(trade.qty_wh),
-        "price": float(trade.price),
+        "price": int(round(float(trade.price))),
     }
 
 
 def result_hash(trades: Sequence[Any], p_ref: float) -> str:
-    """Hash over sorted trade list + p_ref."""
+    """Hash over the sorted integer trade list + integer p_ref (paise/kWh)."""
     payload = {
-        "p_ref": float(p_ref),
+        "p_ref": int(round(float(p_ref))),
         "trades": sorted(
             (_trade_record(t) for t in trades),
             key=lambda r: (r["buyer_id"], r["seller_id"], r["qty_wh"], r["price"]),

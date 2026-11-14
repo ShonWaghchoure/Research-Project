@@ -7,6 +7,7 @@ import { State, WagmiProvider } from "wagmi";
 import { ThemeProvider } from "next-themes";
 import { TooltipProvider } from "@radix-ui/react-tooltip";
 import { config } from "@/lib/wagmi";
+import { SessionGuard } from "@/components/session-guard";
 
 export function Providers({
   children,
@@ -32,6 +33,7 @@ export function Providers({
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem disableTransitionOnChange>
       <WagmiProvider config={config} initialState={initialState}>
         <QueryClientProvider client={queryClient}>
+          <SessionGuard />
           <TooltipProvider delayDuration={200}>{children}</TooltipProvider>
         </QueryClientProvider>
       </WagmiProvider>

@@ -21,8 +21,16 @@ export const DEMO_ACCOUNTS: Address[] = [
   "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
 ];
 
+/**
+ * Demo wallets sign with Hardhat's publicly known keys, so they must never appear on a
+ * public site. Development builds (`next dev`, Playwright, make demo) enable them on the
+ * local chain; a production build needs an explicit NEXT_PUBLIC_ENABLE_DEMO_WALLET=true,
+ * so forgetting to set NEXT_PUBLIC_CHAIN_ID (which defaults to 31337) cannot turn them on.
+ */
 export const DEMO_WALLET_ENABLED =
-  CHAIN_ID === hardhat.id && process.env.NEXT_PUBLIC_DISABLE_DEMO_WALLET !== "true";
+  CHAIN_ID === hardhat.id &&
+  process.env.NEXT_PUBLIC_DISABLE_DEMO_WALLET !== "true" &&
+  (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ENABLE_DEMO_WALLET === "true");
 
 export const chains = [hardhat, sepolia] as const;
 

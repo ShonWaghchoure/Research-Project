@@ -1,6 +1,6 @@
 "use client";
 
-import { useAccount, useReadContracts } from "wagmi";
+import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import type { Address } from "viem";
 import { contracts } from "./contracts";
 
@@ -48,4 +48,23 @@ export function useChainAccount(override?: Address) {
     : undefined;
 
   return { ...query, data, address };
+}
+
+const ZERO_HASH = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+/**
+ * The commit hash recorded on chain for (interval, connected wallet), or null if none.
+ * The chain is the source of truth for "has this position been committed": after a
+ * refresh or navigation the page resumes from here instead of from local state.
+ */
+export function useOnChainCommit(intervalId?: number | null) {
+  const { address } = useAccount();
+  const q = useReadContract({
+    ...contracts.Settlement,
+    functionName: "commits",
+    args: intervalId != null && address ? [BigInt(intervalId), address] : undefined,
+    query: { enabled: intervalId != null && !!address, refetchInterval: 10_000 },
+  });
+  const hash = (q.data as `0x${string}` | undefined) ?? undefined;
+  return { ...q, commitHash: hash && hash !== ZERO_HASH ? hash : null };
 }

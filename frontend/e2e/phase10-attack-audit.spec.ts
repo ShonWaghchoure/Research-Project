@@ -2,20 +2,27 @@ import { expect, test } from "@playwright/test";
 
 const MOCK_API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
-async function injectAdminSession(page: import("@playwright/test").Page) {
+const DEMO_WALLET = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"; // demo-0
+
+/**
+ * The admin UI only trusts a session that belongs to the connected wallet, so connect the
+ * demo wallet first, then attach an admin session for that same address and reload.
+ * (A token alone, with no wallet, is rejected by the session guard.)
+ */
+async function signInAsAdmin(page: import("@playwright/test").Page, path: string) {
+  await page.goto(path);
+  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByTestId("demo-0").click();
+  await expect(page.getByRole("button", { name: "Disconnect wallet" })).toBeVisible();
+
   const res = await fetch(`${MOCK_API}/auth/dev-login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "admin" }),
+    body: JSON.stringify({ role: "admin", address: DEMO_WALLET }),
   });
   expect(res.ok).toBeTruthy();
-  const tok = (await res.json()) as {
-    access_token: string;
-    role: string;
-    address: string;
-  };
-
-  await page.addInitScript((session) => {
+  const tok = (await res.json()) as { access_token: string; role: string; address: string };
+  await page.evaluate((session) => {
     sessionStorage.setItem(
       "ftp2p.session",
       JSON.stringify({
@@ -23,17 +30,13 @@ async function injectAdminSession(page: import("@playwright/test").Page) {
           token: session.access_token,
           address: session.address,
           role: session.role,
-          me: {
-            user_id: 1,
-            address: session.address,
-            role: session.role,
-            participant: null,
-          },
+          me: { user_id: 1, address: session.address, role: session.role, participant: null },
         },
         version: 0,
       }),
     );
   }, tok);
+  await page.reload();
 }
 
 test.describe("Phase 10 attack lab and audit", () => {
@@ -59,12 +62,10 @@ test.describe("Phase 10 attack lab and audit", () => {
   });
 
   test("admin can run an attack scenario", async ({ page }) => {
-    await injectAdminSession(page);
-
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
 
-    await page.goto("/attack");
+    await signInAsAdmin(page, "/attack");
     await expect(page.getByRole("heading", { level: 1, name: "Attack lab" })).toBeVisible();
     await expect(page.getByRole("radio", { name: /Sybil farm/i })).toBeVisible();
 
@@ -83,6 +84,25 @@ test.describe("Phase 10 attack lab and audit", () => {
     await expect(page.getByText(/On:.*defenses on/i)).toBeVisible();
 
     expect(errors, "console errors").toEqual([]);
+  });
+
+  test("an admin token without the matching wallet connected is not trusted", async ({ page }) => {
+    // Session for the admin address, but no wallet connected: the guard drops it.
+    const res = await fetch(`${MOCK_API}/auth/dev-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "admin" }),
+    });
+    const tok = (await res.json()) as { access_token: string; role: string; address: string };
+    await page.addInitScript((session) => {
+      sessionStorage.setItem(
+        "ftp2p.session",
+        JSON.stringify({ state: { token: session.access_token, address: session.address, role: session.role, me: null }, version: 0 }),
+      );
+    }, tok);
+    await page.goto("/admin");
+    await expect(page.getByText(/Sign in with an admin wallet/i)).toBeVisible();
+    await expect(page.getByText(/Market parameters/i)).toHaveCount(0);
   });
 
   test("non-admin cannot use admin console APIs via UI", async ({ page }) => {

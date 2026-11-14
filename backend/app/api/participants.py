@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_participant
 from app.db.deps import get_db
-from app.db.models import EvState, FeederNode, Participant, ParticipantType, User
+from app.db.models import AuditLog, EvState, FeederNode, Participant, ParticipantType, User
 from app.schemas.participants import (
     MeResponse,
     ParticipantCreate,
@@ -16,6 +16,16 @@ from app.schemas.participants import (
 )
 
 router = APIRouter(tags=["participants"])
+
+#: Fields an owner may set at creation but only an admin may change afterwards.
+_ADMIN_ONLY_FIELDS = {
+    "feeder_node_id",
+    "pv_capacity_kw",
+    "battery_kwh",
+    "ev_battery_kwh",
+    "ev_max_power_kw",
+    "ev_v2g",
+}
 
 
 def _kw_to_w(kw: float) -> int:
@@ -111,6 +121,7 @@ def create_participant(
 def update_participant(
     participant_id: int,
     body: ParticipantUpdate,
+    request: Request,
     user: User = Depends(require_participant),
     db: Session = Depends(get_db),
 ) -> ParticipantOut:
@@ -121,6 +132,17 @@ def update_participant(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not your participant")
 
     data = body.model_dump(exclude_unset=True)
+    is_admin = user.role.value == "admin"
+    locked = sorted(set(data) & _ADMIN_ONLY_FIELDS)
+    if locked and not is_admin:
+        # Declared capacity is what the false-report detector checks meter readings
+        # against, and the feeder node feeds the published audit inputs. Letting owners
+        # change them at will would let a cheater raise capacity before over-reporting.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"only an admin can change: {', '.join(locked)}",
+        )
+    before = participant_to_out(p, db.get(User, p.user_id)).model_dump()  # type: ignore[arg-type]
     if "feeder_node_id" in data:
         node = db.get(FeederNode, data["feeder_node_id"])
         if node is None:
@@ -148,8 +170,23 @@ def update_participant(
     if "active" in data and data["active"] is not None:
         p.active = data["active"]
 
-    db.commit()
-    db.refresh(p)
+    db.flush()
     owner = db.get(User, p.user_id)
     assert owner is not None
-    return participant_to_out(p, owner)
+    out = participant_to_out(p, owner)
+    after = out.model_dump()
+    changed = {k for k in after if before.get(k) != after.get(k)}
+    if changed:
+        db.add(
+            AuditLog(
+                actor_user_id=user.id,
+                action="participant.update",
+                resource_type="participant",
+                resource_id=str(p.id),
+                before={k: before[k] for k in sorted(changed)},
+                after={k: after[k] for k in sorted(changed)},
+                ip=request.client.host if request.client else None,
+            )
+        )
+    db.commit()
+    return out

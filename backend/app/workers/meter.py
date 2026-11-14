@@ -19,10 +19,15 @@ METER_SEED = 42
 LAZY_SHORTFALL_FRAC = 0.5  # lazy bots deliver half
 
 
-def _is_lazy(part: Participant | None) -> bool:
-    if part is None or not part.display_name:
+def _is_lazy(db: Session, part: Participant | None) -> bool:
+    """Only the designated demo bot under-delivers (see bots.lazy_bot_address)."""
+    from app.workers.bots import lazy_bot_address
+
+    lazy = lazy_bot_address()
+    if part is None or lazy is None:
         return False
-    return "lazy" in part.display_name.lower()
+    user = db.get(User, part.user_id)
+    return user is not None and user.address.lower() == lazy.lower()
 
 
 def _addr(db: Session, participant_id: int) -> str:
@@ -47,14 +52,13 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
 
     db.query(Delivery).filter(Delivery.interval_id == interval.id).delete()
 
-    seller_shortfall: dict[int, int] = defaultdict(int)
     seller_buyer_shortfall: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
     export_wh: dict[int, int] = defaultdict(int)
     import_wh: dict[int, int] = defaultdict(int)
 
     for t in trades:
         seller = db.get(Participant, t.seller_id)
-        if _is_lazy(seller):
+        if _is_lazy(db, seller):
             delivered = int(t.qty_wh * (1.0 - LAZY_SHORTFALL_FRAC))
         else:
             delivered = int(t.qty_wh)
@@ -67,7 +71,6 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
                 shortfall_wh=shortfall,
             )
         )
-        seller_shortfall[t.seller_id] += shortfall
         seller_buyer_shortfall[t.seller_id][t.buyer_id] += shortfall
         export_wh[t.seller_id] += delivered
         import_wh[t.buyer_id] += delivered
@@ -110,87 +113,77 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
 
     db.flush()
 
-    leaves: list[str] = []
-    leaf_meta: list[tuple[int, str, int]] = []
-    sellers = sorted({t.seller_id for t in trades})
-    if not sellers:
-        zero = "0x0000000000000000000000000000000000000000"
-        leaves = [shortfall_leaf(interval.id, zero, 0)]
-        leaf_meta = [(-1, zero, 0)]
-    else:
-        for sid in sellers:
-            addr = _addr(db, sid)
-            sf = int(seller_shortfall.get(sid, 0))
-            leaves.append(shortfall_leaf(interval.id, addr, sf))
-            leaf_meta.append((sid, addr, sf))
+    pairs = _shortfall_pairs(db, trades, seller_buyer_shortfall)
+    leaves = _pair_leaves(interval.id, pairs)
 
     tree = build_tree(leaves)
+    db.commit()  # readings and deliveries are deterministic; safe to persist first
+
+    # Record the root only once it is confirmed on chain: the clock treats a stored
+    # delivery_root as "interval finished" and opens the next one. A revert raises here.
+    client.post_delivery(interval.id, tree.root, db=db)
     interval.delivery_root = tree.root
     db.commit()
 
-    client.post_delivery(interval.id, tree.root, db=db)
-
-    for idx, (sid, addr, sf) in enumerate(leaf_meta):
-        if sf <= 0 or sid < 0:
-            continue
-        buyers = seller_buyer_shortfall.get(sid, {})
-        if not buyers:
-            continue
-        buyer_id = max(buyers.items(), key=lambda kv: kv[1])[0]
-        buyer_addr = _addr(db, buyer_id)
-        proof = get_proof(leaves, idx)
-        try:
-            client.settle_shortfall(interval.id, addr, sf, proof, buyer_addr, db=db)
-        except Exception as exc:
-            logger.warning(
-                "settle_shortfall_failed",
-                interval_id=interval.id,
-                seller=addr,
-                error=str(exc),
-            )
+    _settle_pairs(db, interval, client, pairs, leaves)
 
     logger.info("meter_done", interval_id=interval.id, root=interval.delivery_root)
 
 
+Pair = tuple[str, str, int]  # (seller address, buyer address, shortfall Wh)
+
+
+def _shortfall_pairs(
+    db: Session, trades: list[Trade], seller_buyer_shortfall: dict[int, dict[int, int]]
+) -> list[Pair]:
+    """One entry per traded (seller, buyer) pair, in a fixed order, so the initial run and
+    a restart build the identical tree. Every short-changed buyer gets its own leaf."""
+    keys = sorted({(t.seller_id, t.buyer_id) for t in trades})
+    return [
+        (_addr(db, sid), _addr(db, bid), int(seller_buyer_shortfall.get(sid, {}).get(bid, 0)))
+        for sid, bid in keys
+    ]
+
+
+def _pair_leaves(interval_id: int, pairs: list[Pair]) -> list[str]:
+    if not pairs:
+        zero = "0x0000000000000000000000000000000000000000"
+        return [shortfall_leaf(interval_id, zero, zero, 0)]
+    return [shortfall_leaf(interval_id, s, b, sf) for s, b, sf in pairs]
+
+
+def _settle_pairs(
+    db: Session, interval: Interval, client: ChainClient, pairs: list[Pair], leaves: list[str]
+) -> None:
+    for idx, (seller, buyer, sf) in enumerate(pairs):
+        if sf <= 0:
+            continue
+        try:
+            client.settle_shortfall(interval.id, seller, sf, get_proof(leaves, idx), buyer, db=db)
+        except Exception as exc:
+            logger.warning(
+                "settle_shortfall_failed",
+                interval_id=interval.id,
+                seller=seller,
+                buyer=buyer,
+                error=str(exc)[:200],
+            )
+
+
 def _settle_existing_shortfalls(db: Session, interval: Interval, client: ChainClient) -> None:
-    """Rebuild the same seller-ordered Merkle tree as the initial meter run."""
+    """Restart path: rebuild the same (seller, buyer) tree and settle any open shortfalls."""
     trades = db.query(Trade).filter(Trade.interval_id == interval.id).all()
     deliveries = {
         d.trade_id: d
         for d in db.query(Delivery).filter(Delivery.interval_id == interval.id).all()
     }
-    seller_shortfall: dict[int, int] = defaultdict(int)
     seller_buyer_shortfall: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
     for t in trades:
         d = deliveries.get(t.id)
         sf = int(d.shortfall_wh) if d else 0
-        seller_shortfall[t.seller_id] += sf
         if sf > 0:
             seller_buyer_shortfall[t.seller_id][t.buyer_id] += sf
-
-    sellers = sorted({t.seller_id for t in trades})
-    if not sellers:
+    if not trades:
         return
-    leaves = [
-        shortfall_leaf(interval.id, _addr(db, sid), int(seller_shortfall.get(sid, 0)))
-        for sid in sellers
-    ]
-    for idx, sid in enumerate(sellers):
-        sf = int(seller_shortfall.get(sid, 0))
-        if sf <= 0:
-            continue
-        buyers = seller_buyer_shortfall.get(sid, {})
-        if not buyers:
-            continue
-        buyer_id = max(buyers.items(), key=lambda kv: kv[1])[0]
-        try:
-            client.settle_shortfall(
-                interval.id,
-                _addr(db, sid),
-                sf,
-                get_proof(leaves, idx),
-                _addr(db, buyer_id),
-                db=db,
-            )
-        except Exception as exc:
-            logger.info("shortfall_retry_skip", seller=sid, error=str(exc)[:200])
+    pairs = _shortfall_pairs(db, trades, seller_buyer_shortfall)
+    _settle_pairs(db, interval, client, pairs, _pair_leaves(interval.id, pairs))

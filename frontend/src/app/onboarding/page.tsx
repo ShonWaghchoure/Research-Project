@@ -43,7 +43,9 @@ export default function OnboardingPage() {
   }, [signedIn, me, refreshMe]);
 
   const hasProfile = !!me?.participant;
-  const hasTokens = (chain.data?.balancePaise ?? 0n) > 0n || (chain.data?.stakePaise ?? 0n) > 0n;
+  // Enough to reach the minimum stake (wallet + already staked), not merely "any tokens":
+  // a wallet holding 1 paisa used to skip the faucet and then fail at staking.
+  const hasTokens = (chain.data?.balancePaise ?? 0n) + (chain.data?.stakePaise ?? 0n) >= chainParams.minStakePaise;
   const registered = chain.data?.registered ?? false;
 
   const current: StepId = !isConnected ? "connect" : !signedIn ? "signin" : !hasProfile ? "profile" : !hasTokens ? "faucet" : !registered ? "register" : "register";

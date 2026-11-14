@@ -34,6 +34,17 @@ def _bot_accounts(count: int) -> list[tuple[int, HardhatAccount]]:
     return out
 
 
+def lazy_bot_address() -> str | None:
+    """Address of the one bot that deliberately under-delivers in demo mode, or None.
+
+    Identity is the bot's Hardhat address, never the display name: users can edit their
+    name, and a name containing "lazy" must not get a real participant slashed."""
+    if not settings.DEMO_MODE:
+        return None
+    bots = _bot_accounts(settings.DEMO_BOT_COUNT)
+    return to_checksum_address(bots[-1][1].address) if bots else None
+
+
 def _ensure_lazy_name(db: Session, part: Participant, acct_index: int) -> None:
     # Mark the last bot as lazy (non-revealing + shortfall)
     if part.display_name and "lazy" in part.display_name.lower():
@@ -84,10 +95,13 @@ def _fund_bot_tokens(client: ChainClient, account, db: Session, need: int) -> No
 
     # Demo fallback: operator mints the shortfall (faucet exhausted / spent).
     shortfall = need - bal
+    # The bot's tx count versions the key: a wallet balance only drops through the bot's
+    # own transactions, so a later top-up gets a new key instead of silently deduping.
+    version = int(client.w3.eth.get_transaction_count(addr))
     try:
         client.send_operator_tx(
             "mint",
-            f"bot:{addr.lower()}:mint:{shortfall}",
+            f"bot:{addr.lower()}:mint:{shortfall}:{version}",
             lambda c, a=addr, amt=shortfall: c.functions.mint(a, amt),
             contract_name="MockINR",
             db=db,
@@ -148,10 +162,14 @@ def _ensure_onchain(client: ChainClient, account, part: Participant, db: Session
                 db=db,
             )
 
+    # Keys carry the current on-chain value plus the bot's tx count. Stake and escrow
+    # shrink through slashing/settlement without the bot sending anything, so a fixed key
+    # would make every later top-up a no-op (bots ran dry and then broke settle batches).
+    version = int(client.w3.eth.get_transaction_count(addr))
     if stake < STAKE_AMOUNT:
         client.send_tx(
             method="stake",
-            idempotency_key=f"bot:{addr.lower()}:stake",
+            idempotency_key=f"bot:{addr.lower()}:stake:{stake}:{version}",
             build_fn=lambda c: c.functions.stake(STAKE_AMOUNT),
             account=account,
             contract_name="Registry",
@@ -176,7 +194,7 @@ def _ensure_onchain(client: ChainClient, account, part: Participant, db: Session
     if escrow < ESCROW_DEPOSIT // 2:
         client.send_tx(
             method="deposit",
-            idempotency_key=f"bot:{addr.lower()}:deposit:{part.id}",
+            idempotency_key=f"bot:{addr.lower()}:deposit:{escrow}:{version}",
             build_fn=lambda c: c.functions.deposit(ESCROW_DEPOSIT),
             account=account,
             contract_name="Settlement",

@@ -41,6 +41,71 @@ def load_market_params(db: Session) -> MarketParams:
     return MarketParams(**kwargs) if kwargs else DEFAULT_PARAMS
 
 
+#: Retail tariff baked into the deployed Settlement contract (immutable pRetPaise).
+#: postClearing reverts if p_ref exceeds it, so p_ret may never be configured above it.
+CHAIN_P_RET_PAISE = 800
+
+_INT_KEYS = {f.name for f in fields(MarketParams) if f.type in (int, "int")}
+
+# (min, max, min_inclusive, max_inclusive)
+_RANGES: dict[str, tuple[float, float, bool, bool]] = {
+    "p_fit": (0, CHAIN_P_RET_PAISE, True, False),
+    "p_ret": (1, CHAIN_P_RET_PAISE, True, True),
+    "interval_seconds": (5, 86_400, True, True),
+    "demo_interval_seconds": (5, 3_600, True, True),
+    "k": (1, 10, True, True),
+    "alpha": (0, 1, False, True),
+    "c": (1, 100, True, True),
+    "r_ref": (0, 1, False, True),
+    "rho_min": (0, 1, True, False),
+    "r_cap": (0, 1, False, True),
+    "beta": (0, float("inf"), True, True),
+    "match_lambda": (0, 1_000, True, True),
+    "dt_hours": (0, 1, False, True),
+    "w_del": (0, 1, True, True),
+    "w_rev": (0, 1, True, True),
+    "w_hon": (0, 1, True, True),
+    "w_col": (0, 1, True, True),
+    "alpha0": (0, 1_000, False, True),
+    "beta0": (0, 1_000, False, True),
+    "kappa": (1, 100, True, True),
+    "z": (0, 10, True, True),
+    "half_life_intervals": (1, 1_000_000, True, True),
+    "shortfall_penalty_f": (0, 1, True, True),
+    "collusion_window_intervals": (1, 100_000, True, True),
+}
+
+
+def validate_config(merged: dict[str, Any]) -> list[str]:
+    """Return human-readable problems with a full config map (empty list = valid)."""
+    errors: list[str] = []
+    for key, value in merged.items():
+        if key not in PARAM_KEYS:
+            errors.append(f"{key}: unknown setting")
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            errors.append(f"{key}: must be a number")
+            continue
+        if key in _INT_KEYS and not float(value).is_integer():
+            errors.append(f"{key}: must be a whole number")
+            continue
+        lo, hi, lo_inc, hi_inc = _RANGES[key]
+        if (value < lo or (value == lo and not lo_inc)) or (value > hi or (value == hi and not hi_inc)):
+            errors.append(
+                f"{key}: must be {'≥' if lo_inc else '>'} {lo} and {'≤' if hi_inc else '<'} {hi}"
+            )
+    if errors:
+        return errors
+    if merged["p_fit"] >= merged["p_ret"]:
+        errors.append("p_fit must be below p_ret")
+    elif merged["beta"] > 0.05 * (merged["p_ret"] - merged["p_fit"]):
+        errors.append("beta must be at most 5% of (p_ret − p_fit)")
+    weights = sum(merged[k] for k in ("w_del", "w_rev", "w_hon", "w_col"))
+    if abs(weights - 1.0) > 1e-6:
+        errors.append(f"reputation weights w_del + w_rev + w_hon + w_col must sum to 1 (got {weights:g})")
+    return errors
+
+
 def update_config(
     db: Session,
     updates: dict[str, Any],

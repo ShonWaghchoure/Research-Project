@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from eth_utils import to_checksum_address
+from eth_utils import is_address, to_checksum_address
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -16,6 +16,8 @@ router = APIRouter(tags=["reputation"])
 
 
 def _user_by_address(db: Session, address: str) -> User:
+    if not is_address(address):
+        raise HTTPException(status_code=422, detail="invalid address")
     checksum = to_checksum_address(address)
     user = db.query(User).filter(User.address == checksum).one_or_none()
     if user is None:
@@ -100,9 +102,11 @@ def reputation_proof(
         .order_by(ReputationScore.participant_id)
         .all()
     )
-    leaves = [s.leaf_hash for s in all_scores if s.leaf_hash]
+    # Index into the same filtered list the tree is built from.
+    with_leaf = [s for s in all_scores if s.leaf_hash]
+    leaves: list[str] = [s.leaf_hash for s in with_leaf if s.leaf_hash is not None]
     try:
-        idx = next(i for i, s in enumerate(all_scores) if s.participant_id == part.id)
+        idx = next(i for i, s in enumerate(with_leaf) if s.participant_id == part.id)
     except StopIteration as exc:
         raise HTTPException(status_code=404, detail="leaf missing") from exc
     tree = build_tree(leaves)

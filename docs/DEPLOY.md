@@ -13,7 +13,9 @@ Copy `.env.example` → `.env` and `frontend/.env.example` → `frontend/.env.lo
 | `REDIS_URL` | backend | Redis |
 | `CHAIN_RPC_URL` / `CHAIN_ID` | backend | `http://127.0.0.1:8545` / `31337` local |
 | `OPERATOR_PRIVATE_KEY` | backend / Hardhat | **Never** commit real keys; Hardhat #0 only for local |
-| `JWT_SECRET` | backend | Rotate in production |
+| `JWT_SECRET` | backend | Random, 32+ chars. The backend **refuses to start** off the local chain with the public default |
+| `SIWE_DOMAIN` / `SIWE_URI` | backend | The frontend's host (e.g. `app.example.com` / `https://app.example.com`). Sign-in messages for any other site are rejected. Must not be `localhost` off the local chain |
+| `ADMIN_ADDRESSES` / `OPERATOR_ADDRESSES` | backend seed | Your own wallets. Off the local chain the seed creates **only** these privileged users; Hardhat demo accounts (public keys) are never seeded |
 | `CORS_ORIGINS` | backend | Comma list in production (e.g. `https://app.example.com`); `*` for local |
 | `INTERVAL_SECONDS` | backend | `45` demo, `900` production-like |
 | `DEMO_MODE` / `DEMO_BOT_COUNT` | backend | `1` / `20` for demo |
@@ -43,8 +45,15 @@ docker run --rm -p 8000:8000 --env-file .env ft-backend
 # Frontend (bake public API URL at build time)
 docker build -t ft-frontend ./frontend \
   --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
-  --build-arg NEXT_PUBLIC_CHAIN_ID=31337 \
-  --build-arg NEXT_PUBLIC_RPC_URL=https://rpc.example.com
+  --build-arg NEXT_PUBLIC_CHAIN_ID=11155111 \
+  --build-arg NEXT_PUBLIC_RPC_URL=https://rpc.example.com \
+  --build-arg NEXT_PUBLIC_MOCK_INR_ADDRESS=0x... \
+  --build-arg NEXT_PUBLIC_REGISTRY_ADDRESS=0x... \
+  --build-arg NEXT_PUBLIC_SETTLEMENT_ADDRESS=0x... \
+  --build-arg NEXT_PUBLIC_REPUTATION_ANCHOR_ADDRESS=0x...
+# Off the local chain the four addresses are required (the build fails without them).
+# Demo wallets stay off in production builds unless NEXT_PUBLIC_ENABLE_DEMO_WALLET=true,
+# which is only for a private local demo.
 docker run --rm -p 3000:3000 ft-frontend
 ```
 
@@ -79,12 +88,20 @@ npm run deploy:sepolia
 # Verify on https://sepolia.etherscan.io
 ```
 
-Update backend `CHAIN_ID=11155111` and frontend `NEXT_PUBLIC_*` to match.
+Update backend `CHAIN_ID=11155111` and set the frontend's `NEXT_PUBLIC_CHAIN_ID=11155111` plus
+`NEXT_PUBLIC_MOCK_INR_ADDRESS`, `NEXT_PUBLIC_REGISTRY_ADDRESS`, `NEXT_PUBLIC_SETTLEMENT_ADDRESS` and
+`NEXT_PUBLIC_REPUTATION_ANCHOR_ADDRESS` from `deployments/sepolia.json`. Then seed with your own wallets:
+`ADMIN_ADDRESSES=0x... OPERATOR_ADDRESSES=0x... python -m app.db.seed`.
 **Localhost remains the supported one-click demo path.**
 
 ## Security checklist before public deploy
 
-- [ ] Rotate `JWT_SECRET` and operator key; never use Hardhat keys on public nets  
+- [ ] Rotate `JWT_SECRET` and operator key; never use Hardhat keys on public nets (the backend refuses to start otherwise)  
+- [ ] Set `SIWE_DOMAIN` / `SIWE_URI` to the frontend's site  
+- [ ] Seed admin/operator from `ADMIN_ADDRESSES` / `OPERATOR_ADDRESSES` (never Hardhat accounts)  
+- [ ] Set all four `NEXT_PUBLIC_*_ADDRESS` variables; leave demo wallets disabled  
+- [ ] Do not expose Postgres, Redis or the Hardhat node publicly (compose binds them to 127.0.0.1)  
+- [ ] Never run `frontend/mock/server.mjs` publicly (local test tool; `/auth/dev-login` only with `MOCK_DEV_LOGIN=1`)  
 - [ ] Set explicit `CORS_ORIGINS`  
 - [ ] `DEMO_MODE=0`  
 - [ ] Run `bash scripts/security-pass.sh` and review CI secret scan  

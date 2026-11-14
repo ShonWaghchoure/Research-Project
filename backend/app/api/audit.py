@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from app.api import audit_service
 from app.api.deps import require_operator
 from app.db.deps import get_db
-from app.db.models import Interval, User
+from app.db.models import Interval, IntervalState, User
 from app.schemas.audit import AuditReport, AuditRerunResponse
 
 router = APIRouter(prefix="/audit", tags=["audit"])
+
+_BIDS_STILL_SEALED = {IntervalState.OPEN, IntervalState.COMMIT, IntervalState.REVEAL}
 
 
 @router.get("/{interval_id}", response_model=AuditReport)
@@ -22,6 +24,12 @@ def get_audit_report(
     iv = db.get(Interval, interval_id)
     if iv is None:
         raise HTTPException(status_code=404, detail="interval not found")
+    if iv.state in _BIDS_STILL_SEALED:
+        # Publishing revealed bids while others can still decide whether to reveal would
+        # let them see everyone's price first (selective-reveal advantage).
+        raise HTTPException(
+            status_code=409, detail="audit data is published once the reveal window closes"
+        )
     return AuditReport.model_validate(audit_service.get_audit(db, iv))
 
 

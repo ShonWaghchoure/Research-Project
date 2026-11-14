@@ -25,6 +25,9 @@ contract Registry is AccessControl, ReentrancyGuard {
     /// @notice Withdrawal cooldown in seconds.
     uint64 public withdrawCooldown;
 
+    /// @notice Upper bound for withdrawCooldown (prevents timestamp overflow in requestWithdraw).
+    uint64 public constant MAX_WITHDRAW_COOLDOWN = 365 days;
+
     struct Participant {
         uint256 stake;
         uint256 pendingWithdraw;
@@ -43,6 +46,9 @@ contract Registry is AccessControl, ReentrancyGuard {
     event Withdrawn(address indexed participant, uint256 amount);
     event Slashed(address indexed participant, uint256 amount, address indexed beneficiary);
     event Suspended(address indexed participant);
+    event Unsuspended(address indexed participant);
+    event Deregistered(address indexed participant, bytes32 indexed meterKeyHash, uint256 stakeQueued);
+    event MeterKeyReleased(bytes32 indexed meterKeyHash, address indexed previousOwner);
     event MinStakeUpdated(uint256 minStake);
     event WithdrawCooldownUpdated(uint64 cooldown);
 
@@ -63,6 +69,7 @@ contract Registry is AccessControl, ReentrancyGuard {
         require(address(token_) != address(0), "Registry: token");
         require(admin != address(0), "Registry: admin");
         require(operator != address(0), "Registry: operator");
+        require(withdrawCooldown_ <= MAX_WITHDRAW_COOLDOWN, "Registry: cooldown too long");
         token = token_;
         minStake = minStake_;
         withdrawCooldown = withdrawCooldown_;
@@ -75,6 +82,15 @@ contract Registry is AccessControl, ReentrancyGuard {
      */
     function getParticipant(address account) external view returns (Participant memory) {
         return _participants[account];
+    }
+
+    /**
+     * @notice True when `account` may trade: registered, not suspended, and stake at least
+     *         `minStake` (a slash below the minimum makes the participant inactive until they top up).
+     */
+    function isActive(address account) external view returns (bool) {
+        Participant storage p = _participants[account];
+        return p.registered && !p.suspended && p.stake >= minStake;
     }
 
     /**
@@ -111,7 +127,34 @@ contract Registry is AccessControl, ReentrancyGuard {
      * @dev Unlocks after `withdrawCooldown`. Reverts if there is nothing withdrawable or a pending request.
      */
     function requestWithdraw() external {
+        _queueWithdraw(msg.sender);
+    }
+
+    /**
+     * @notice Leave the market: free the meter key and queue the whole stake for withdrawal.
+     * @dev The queued stake can still be slashed during the cooldown, so open shortfalls are
+     *      covered; previously the last `minStake` stayed locked forever.
+     */
+    function deregister() external {
         Participant storage p = _participants[msg.sender];
+        require(p.registered, "Registry: not registered");
+        bytes32 key = p.meterKeyHash;
+        p.registered = false;
+        p.meterKeyHash = bytes32(0);
+        delete meterKeyOwner[key];
+        uint256 queued = 0;
+        if (p.stake > 0) {
+            queued = p.stake;
+            p.pendingWithdraw += queued;
+            p.stake = 0;
+            p.withdrawAvailableAt = uint64(block.timestamp) + withdrawCooldown;
+            emit WithdrawRequested(msg.sender, queued, p.withdrawAvailableAt);
+        }
+        emit Deregistered(msg.sender, key, queued);
+    }
+
+    function _queueWithdraw(address account) internal {
+        Participant storage p = _participants[account];
         require(p.pendingWithdraw == 0, "Registry: pending exists");
         uint256 locked = p.registered ? minStake : 0;
         require(p.stake > locked, "Registry: nothing to withdraw");
@@ -119,7 +162,7 @@ contract Registry is AccessControl, ReentrancyGuard {
         p.stake = locked;
         p.pendingWithdraw = amount;
         p.withdrawAvailableAt = uint64(block.timestamp) + withdrawCooldown;
-        emit WithdrawRequested(msg.sender, amount, p.withdrawAvailableAt);
+        emit WithdrawRequested(account, amount, p.withdrawAvailableAt);
     }
 
     /**
@@ -137,23 +180,35 @@ contract Registry is AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Slash stake to `beneficiary`. Callable only by Settlement.
+     * @notice Slash up to `amount` to `beneficiary`. Callable only by Settlement.
+     * @dev Draws from active stake first, then from stake queued for withdrawal (so a seller
+     *      cannot dodge a shortfall by calling requestWithdraw first). Never reverts for lack
+     *      of funds: it slashes what is available and returns that amount, so one large
+     *      shortfall cannot block settlement.
      * @param participant Account to slash.
-     * @param amount Paise to move.
+     * @param amount Paise requested.
      * @param beneficiary Recipient of slashed funds.
+     * @return slashed Paise actually moved.
      */
     function slash(address participant, uint256 amount, address beneficiary)
         external
         onlyRole(SETTLEMENT_ROLE)
         nonReentrant
+        returns (uint256 slashed)
     {
         require(amount > 0, "Registry: zero amount");
         require(beneficiary != address(0), "Registry: beneficiary");
         Participant storage p = _participants[participant];
-        require(p.stake >= amount, "Registry: insufficient stake");
-        p.stake -= amount;
-        token.safeTransfer(beneficiary, amount);
-        emit Slashed(participant, amount, beneficiary);
+        uint256 fromStake = amount <= p.stake ? amount : p.stake;
+        p.stake -= fromStake;
+        uint256 rest = amount - fromStake;
+        uint256 fromPending = rest <= p.pendingWithdraw ? rest : p.pendingWithdraw;
+        p.pendingWithdraw -= fromPending;
+        slashed = fromStake + fromPending;
+        if (slashed > 0) {
+            token.safeTransfer(beneficiary, slashed);
+        }
+        emit Slashed(participant, slashed, beneficiary);
     }
 
     /**
@@ -169,6 +224,32 @@ contract Registry is AccessControl, ReentrancyGuard {
     }
 
     /**
+     * @notice Lift a suspension (admin).
+     */
+    function unsuspend(address participant) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        Participant storage p = _participants[participant];
+        require(p.suspended, "Registry: not suspended");
+        p.suspended = false;
+        emit Unsuspended(participant);
+    }
+
+    /**
+     * @notice Free a meter key that was registered by the wrong address (e.g. squatted) (admin).
+     *      The previous owner is deregistered; their stake stays and can be withdrawn.
+     */
+    function releaseMeterKey(bytes32 meterKeyHash) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        address owner = meterKeyOwner[meterKeyHash];
+        require(owner != address(0), "Registry: key free");
+        delete meterKeyOwner[meterKeyHash];
+        Participant storage p = _participants[owner];
+        if (p.meterKeyHash == meterKeyHash) {
+            p.registered = false;
+            p.meterKeyHash = bytes32(0);
+        }
+        emit MeterKeyReleased(meterKeyHash, owner);
+    }
+
+    /**
      * @notice Update minimum stake (admin).
      */
     function setMinStake(uint256 minStake_) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -180,6 +261,7 @@ contract Registry is AccessControl, ReentrancyGuard {
      * @notice Update withdraw cooldown (admin).
      */
     function setWithdrawCooldown(uint64 cooldown_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(cooldown_ <= MAX_WITHDRAW_COOLDOWN, "Registry: cooldown too long");
         withdrawCooldown = cooldown_;
         emit WithdrawCooldownUpdated(cooldown_);
     }

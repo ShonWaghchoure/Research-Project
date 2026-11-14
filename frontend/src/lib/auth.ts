@@ -1,5 +1,6 @@
 "use client";
 
+import { useAccount } from "wagmi";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { api, setTokenGetter } from "./api/client";
@@ -77,6 +78,9 @@ export function useIsSignedIn(connectedAddress?: string | null): boolean {
 
 /** True when the signed-in user has the admin role. */
 export function useIsAdmin(): boolean {
+  const { address } = useAccount();
   const role = useAuth((s) => s.role);
-  return role === "admin";
+  const signedIn = useIsSignedIn(address);
+  // The admin session must belong to the wallet that is connected right now.
+  return role === "admin" && signedIn;
 }

@@ -81,6 +81,9 @@ class User(Base):
     )
     nonce: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     nonce_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    nonce_issued_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -174,6 +177,9 @@ class Interval(Base):
     result_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True)
     delivery_root: Mapped[Optional[str]] = mapped_column(String(66), nullable=True)
     engine_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    #: Exact engine inputs used at clearing (params, previous p_ref, engine positions), so an
+    #: audit re-run reproduces the result even after profiles or config change later.
+    clearing_inputs: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

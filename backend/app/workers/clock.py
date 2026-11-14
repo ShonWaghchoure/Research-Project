@@ -9,7 +9,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.chain.client import ChainClient, get_chain_client
-from app.db.models import Interval, IntervalState
+from app.db.models import Interval, IntervalState, Participant, Transaction, TxStatus
 from app.db.session import SessionLocal
 from app.workers import clearing, detection, meter, poster, reputation, sim_control
 from app.workers.phase_timing import (
@@ -128,11 +128,31 @@ def _current_interval(db: Session) -> Interval | None:
     return db.query(Interval).order_by(Interval.id.desc()).first()
 
 
-def _safe_hook(name: str, interval: Interval, fn) -> None:
+def _safe_hook(name: str, interval: Interval, fn):  # type: ignore[no-untyped-def]
+    """Run a worker step; return its result, or None if it raised (logged)."""
     try:
-        fn()
+        return fn()
     except Exception:
         logger.exception("transition_hook_failed", hook=name, state=interval.state.value, id=interval.id)
+        return None
+
+
+def _interval_complete(db: Session, interval: Interval) -> bool:
+    """Everything for this interval is confirmed on chain: delivery root stored (only set
+    after postDelivery confirms) and the reputation root anchored. The clock only opens
+    the next interval when this holds; it never revisits older intervals, so moving on
+    early would abandon unsettled trades for good."""
+    if not interval.delivery_root:
+        return False
+    tx = (
+        db.query(Transaction)
+        .filter(Transaction.idempotency_key == f"rep:{interval.id}:postRoot")
+        .one_or_none()
+    )
+    if tx is not None:
+        return tx.status == TxStatus.confirmed
+    # No root transaction: complete only if there was nothing to anchor.
+    return db.query(Participant).count() == 0
 
 
 def _run_hooks(db: Session, interval: Interval, client: ChainClient) -> None:
@@ -148,17 +168,23 @@ def _run_hooks(db: Session, interval: Interval, client: ChainClient) -> None:
         _safe_hook("clearing", interval, lambda: clearing.run(db, interval))
         db.refresh(interval)
 
+    settled = False
     if interval.state in (IntervalState.SETTLED, IntervalState.METERED) and interval.result_hash:
         if client.on_chain_interval_opened(interval.id):
-            _safe_hook("poster", interval, lambda: poster.run(db, interval, client=client))
+            settled = bool(_safe_hook("poster", interval, lambda: poster.run(db, interval, client=client)))
             db.refresh(interval)
         else:
             logger.warning("poster_skip_not_open", interval_id=interval.id)
 
     if interval.state == IntervalState.METERED:
-        if not interval.delivery_root and client.on_chain_interval_opened(interval.id):
+        # Metering needs clearing posted and every trade settled on chain; otherwise
+        # postDelivery reverts ("no clearing") or deliveries are recorded for trades
+        # that never moved money.
+        if not interval.delivery_root and settled:
             _safe_hook("meter", interval, lambda: meter.run(db, interval, client=client))
             db.refresh(interval)
+        elif not interval.delivery_root:
+            logger.warning("meter_waiting_for_settlement", interval_id=interval.id)
         if interval.delivery_root:
             _safe_hook("reputation", interval, lambda: reputation.run(db, interval, client=client))
             db.refresh(interval)
@@ -216,7 +242,7 @@ def tick(client: ChainClient | None = None) -> None:
         ends = interval.ends_at
         if ends.tzinfo is None:
             ends = ends.replace(tzinfo=timezone.utc)
-        if now >= ends and interval.state == IntervalState.METERED and interval.delivery_root:
+        if now >= ends and interval.state == IntervalState.METERED and _interval_complete(db, interval):
             _open_new_interval(db, client, starts=max(now, ends))
             return
 

@@ -22,7 +22,7 @@ import { api } from "@/lib/api/client";
 import type { Position } from "@/lib/api/types";
 import { useAuth, useIsSignedIn } from "@/lib/auth";
 import { useSiwe } from "@/lib/siwe";
-import { useChainAccount } from "@/lib/chain";
+import { useChainAccount, useOnChainCommit } from "@/lib/chain";
 import { contracts } from "@/lib/contracts";
 import { computeCommitHash, randomSalt } from "@/lib/commit-hash";
 import { formatInr, formatKwh, formatPrice, formatSdr, inrToPaise, kwhToWh, paiseToInr, paymentPaise } from "@/lib/format";
@@ -195,13 +195,16 @@ function PositionCard({ interval }: { interval: ReturnType<typeof useCurrentInte
   const canCommit = iv?.state === "COMMIT" && !closingSoon;
   const suspended = reputation.data?.tier === "suspended" || chain.data?.suspended;
 
-  // Resume a half-finished flow after a refresh.
+  // Resume a half-finished flow after a refresh or navigation. Whether the position was
+  // committed is read from the contract, not from local state (which a refresh loses).
+  const onChain = useOnChainCommit(existing?.interval_id);
   useEffect(() => {
-    if (phase === "form" && existing && !existing.revealed) {
-      setPosition(existing);
-      setPhase(existing.committed_tx ? "await-reveal" : "commit");
-    }
-  }, [existing, phase]);
+    if (phase !== "form" || !existing || existing.revealed || onChain.isPending) return;
+    const committed =
+      !!onChain.commitHash && onChain.commitHash.toLowerCase() === existing.commit_hash.toLowerCase();
+    setPosition({ ...existing, committed_tx: committed ? existing.committed_tx ?? "on-chain" : null });
+    setPhase(committed ? "await-reveal" : "commit");
+  }, [existing, phase, onChain.isPending, onChain.commitHash]);
 
   // Auto-reveal once the reveal window opens.
   useEffect(() => {
@@ -332,6 +335,18 @@ function PositionCard({ interval }: { interval: ReturnType<typeof useCurrentInte
           )}
         </CardBody>
         <CardFooter>
+          {phase === "commit" && position && !commit.isPending && tx.status !== "signing" && tx.status !== "pending" && (
+            <Button
+              variant="primary"
+              disabled={!canCommit}
+              onClick={() => {
+                setFailure(null);
+                commit.mutate(position);
+              }}
+            >
+              Commit now
+            </Button>
+          )}
           {phase === "failed" && position && !position.committed_tx && (
             <Button variant="primary" onClick={() => { setFailure(null); setPhase("commit"); commit.mutate(position); }}>
               Retry commit
@@ -491,8 +506,8 @@ function MyPositionsCard() {
                     {p.side} {formatKwh(p.qty_wh)} at {paiseToInr(p.limit_price_paise)} ₹/kWh
                   </span>
                 </span>
-                <Badge tone={p.revealed ? "success" : p.committed_tx ? "accent" : "warning"}>
-                  {p.revealed ? "Revealed" : p.committed_tx ? (iv?.id === p.interval_id ? "Committed" : "Not revealed") : "Unsent"}
+                <Badge tone={p.revealed ? "success" : iv?.id === p.interval_id ? "accent" : "warning"}>
+                  {p.revealed ? "Revealed" : iv?.id === p.interval_id ? "Sealed" : "Not revealed"}
                 </Badge>
               </li>
             ))}

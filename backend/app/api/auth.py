@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from eth_utils import is_address, to_checksum_address
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -28,10 +30,14 @@ def issue_nonce(body: NonceRequest, request: Request, db: Session = Depends(get_
         db.add(user)
         db.flush()
     nonce = new_nonce()
+    issued_at = datetime.now(timezone.utc).replace(microsecond=0)
     user.nonce = nonce
     user.nonce_used = False
+    user.nonce_issued_at = issued_at
     db.commit()
-    message = build_siwe_message(address=address, nonce=nonce, chain_id=settings.CHAIN_ID)
+    message = build_siwe_message(
+        address=address, nonce=nonce, chain_id=settings.CHAIN_ID, issued_at=issued_at
+    )
     # Bind limiter key (slowapi uses request)
     _ = request
     return NonceResponse(address=address, nonce=nonce, message=message, chain_id=settings.CHAIN_ID)
@@ -47,14 +53,21 @@ def verify_signature(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid address")
     address = to_checksum_address(body.address)
     user = db.query(User).filter(User.address == address).one_or_none()
-    if user is None or not user.nonce or user.nonce_used:
+    if user is None or not user.nonce or user.nonce_used or user.nonce_issued_at is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="nonce required")
+    expected = build_siwe_message(
+        address=address,
+        nonce=user.nonce,
+        chain_id=settings.CHAIN_ID,
+        issued_at=user.nonce_issued_at,
+    )
     try:
         verify_siwe(
             address=address,
             message=body.message,
             signature=body.signature,
-            expected_nonce=user.nonce,
+            expected_message=expected,
+            issued_at=user.nonce_issued_at,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
@@ -62,6 +75,7 @@ def verify_signature(
     # Single-use nonce
     user.nonce_used = True
     user.nonce = None
+    user.nonce_issued_at = None
     db.commit()
 
     token = create_access_token(subject=address, role=user.role.value, user_id=user.id)

@@ -25,3 +25,13 @@ def test_result_hash_order_invariant() -> None:
     t1 = ClearedTrade("b0", "s0", 1000, 550.0)
     t2 = ClearedTrade("b1", "s1", 500, 550.0)
     assert result_hash([t1, t2], 550.0) == result_hash([t2, t1], 550.0)
+
+
+def test_result_hash_reproducible_from_stored_integers():
+    """Security fix: the posted result hash must be reproducible from what is published
+    (integer Wh, integer paise, rounded p_ref), not from the solver's float price."""
+    from types import SimpleNamespace as T
+
+    engine_view = [T(buyer_id="7", seller_id="9", qty_wh=1500, price=523.47)]
+    stored_view = [T(buyer_id=7, seller_id=9, qty_wh=1500, price=523)]
+    assert result_hash(engine_view, 523.47) == result_hash(stored_view, 523)

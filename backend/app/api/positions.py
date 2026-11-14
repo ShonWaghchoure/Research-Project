@@ -8,11 +8,14 @@ from datetime import timezone
 from eth_utils import to_checksum_address
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_participant
 from app.chain.client import get_chain_client
 from app.chain.commit import compute_commit_hash, side_to_uint8
+from app.core.config import settings
+from app.core.config_store import load_market_params
 from app.db.deps import get_db
 from app.db.models import (
     Interval,
@@ -39,6 +42,23 @@ def _participant_for(user: User, db: Session) -> Participant:
     if part is None:
         raise HTTPException(status_code=400, detail="participant profile required")
     return part
+
+
+#: Generous household import ceiling per interval before storage is added (25 kWh).
+BUY_BASE_WH = 25_000
+#: How far past the interval end an EV deadline may be set.
+MAX_DEADLINE_AFTER_END_S = 7 * 24 * 3600
+
+
+def max_sell_wh(part: Participant, dt_hours: float) -> int:
+    """Most a participant could physically deliver in one interval: PV over the interval,
+    plus a full home battery, plus the EV battery when V2G is enabled."""
+    ev = (part.ev_battery_wh or 0) if part.ev_v2g else 0
+    return int(part.pv_capacity_w * dt_hours) + part.battery_wh + ev
+
+
+def max_buy_wh(part: Participant) -> int:
+    return BUY_BASE_WH + part.battery_wh + (part.ev_battery_wh or 0)
 
 
 def _pos_out(p: Position) -> PositionOut:
@@ -75,11 +95,37 @@ def create_position(
     if existing is not None:
         raise HTTPException(status_code=409, detail="one net position per interval")
 
+    params = load_market_params(db)
+    if not params.p_fit <= body.limit_price_paise <= params.p_ret:
+        raise HTTPException(
+            status_code=422,
+            detail=f"limit_price_paise must be between {params.p_fit} (feed-in) "
+            f"and {params.p_ret} (retail)",
+        )
+    cap = max_sell_wh(part, params.dt_hours) if body.side == "sell" else max_buy_wh(part)
+    if body.qty_wh > cap:
+        raise HTTPException(
+            status_code=422,
+            detail=f"qty_wh {body.qty_wh} exceeds what this participant can "
+            f"{'deliver' if body.side == 'sell' else 'take'} in one interval ({cap} Wh)",
+        )
+
+    starts = interval.starts_at
     ends = interval.ends_at
+    if starts.tzinfo is None:
+        starts = starts.replace(tzinfo=timezone.utc)
     if ends.tzinfo is None:
         ends = ends.replace(tzinfo=timezone.utc)
     deadline = int(body.deadline) if body.deadline is not None else int(ends.timestamp())
-    salt = secrets.token_bytes(32)
+    # 0 means "no deadline" (the browser hashes it as 0, so it must be kept as 0).
+    if deadline != 0 and not (
+        starts.timestamp() <= deadline <= ends.timestamp() + MAX_DEADLINE_AFTER_END_S
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="deadline must fall between the interval start and 7 days after it ends",
+        )
+    salt = bytes.fromhex(body.salt[2:]) if body.salt else secrets.token_bytes(32)
     salt_hex = "0x" + salt.hex()
     side = PositionSide.buy if body.side == "buy" else PositionSide.sell
     commit = compute_commit_hash(
@@ -103,9 +149,14 @@ def create_position(
         revealed=False,
     )
     db.add(pos)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:  # two concurrent submissions for the same interval
+        db.rollback()
+        raise HTTPException(status_code=409, detail="one net position per interval") from exc
     db.refresh(pos)
     return CommitData(
+        id=pos.id,
         position_id=pos.id,
         interval_id=interval.id,
         commit_hash=commit,
@@ -129,11 +180,17 @@ def reveal_position(
     pos = db.get(Position, position_id)
     if pos is None or pos.participant_id != part.id:
         raise HTTPException(status_code=404, detail="position not found")
-    interval = db.get(Interval, pos.interval_id)
+    # Lock the interval row: the clock's REVEAL -> CLEARING update waits for this reveal
+    # (or this reveal sees CLEARING), so a reveal can never land after clearing has read
+    # the revealed positions and be both unmatched and counted as a reveal miss.
+    interval = (
+        db.query(Interval).filter(Interval.id == pos.interval_id).with_for_update().one_or_none()
+    )
     if interval is None:
         raise HTTPException(status_code=404, detail="interval not found")
-    if interval.state not in (IntervalState.OPEN, IntervalState.COMMIT, IntervalState.REVEAL):
-        raise HTTPException(status_code=409, detail="reveal window closed")
+    if interval.state != IntervalState.REVEAL:
+        # Revealing earlier would publish the bid while others can still commit.
+        raise HTTPException(status_code=409, detail="reveal window is not open")
 
     if body and body.salt and pos.salt and body.salt.lower() != pos.salt.lower():
         raise HTTPException(status_code=400, detail="salt mismatch")
@@ -158,16 +215,21 @@ def reveal_position(
     if recomputed.lower() != pos.commit_hash.lower():
         raise HTTPException(status_code=400, detail="commit hash mismatch")
 
+    # The sealed bid only means something if it was committed on chain. Fail closed: a
+    # missing commit, a different commit, or an unreachable chain all refuse the reveal.
     try:
         client = get_chain_client()
-        if client.is_reachable():
-            onchain = client.on_chain_commit(pos.interval_id, user.address)
-            if onchain and onchain.lower() != pos.commit_hash.lower():
-                raise HTTPException(status_code=400, detail="on-chain commit mismatch")
-    except HTTPException:
-        raise
+        reachable = client.is_reachable()
+        onchain = client.on_chain_commit(pos.interval_id, user.address) if reachable else None
     except Exception:
-        pass
+        reachable, onchain = False, None
+    if not reachable:
+        if not settings.testing:
+            raise HTTPException(status_code=503, detail="chain unavailable, try again shortly")
+    elif not onchain:
+        raise HTTPException(status_code=400, detail="no on-chain commit for this position")
+    elif onchain.lower() != pos.commit_hash.lower():
+        raise HTTPException(status_code=400, detail="on-chain commit mismatch")
 
     pos.revealed = True
     db.commit()

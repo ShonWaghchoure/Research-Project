@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from sqlalchemy import desc
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.chain.client import ChainClient, get_chain_client
 from app.core.config import settings
 from app.core.config_store import load_market_params
+from app.core.params import MarketParams
 from app.db.models import Interval, Participant, Position, PositionSide, ReputationScore, Trade
 from app.engine.clearing import clear_interval
 from app.engine.hashing import canonical_json, input_root, keccak256, result_hash
@@ -69,6 +71,27 @@ def build_engine_positions(db: Session, interval: Interval) -> list[EngPosition]
             )
         )
     return eng
+
+
+def engine_inputs(
+    db: Session, interval: Interval
+) -> tuple[list[EngPosition], MarketParams, Optional[float]]:
+    """Inputs clearing actually used: the stored snapshot when present (exact, immune to
+    later profile or config edits), else a best-effort rebuild for older intervals."""
+    snap = interval.clearing_inputs
+    if snap:
+        eng = [EngPosition(**p) for p in snap.get("positions", [])]
+        return eng, MarketParams(**snap["params"]), snap.get("prev_p_ref")
+    prev_p: Optional[float] = None
+    prev_iv = (
+        db.query(Interval)
+        .filter(Interval.id < interval.id, Interval.p_ref_paise.isnot(None))
+        .order_by(desc(Interval.id))
+        .first()
+    )
+    if prev_iv is not None and prev_iv.p_ref_paise is not None:
+        prev_p = float(prev_iv.p_ref_paise)
+    return build_engine_positions(db, interval), load_market_params(db), prev_p
 
 
 def merkle_leaf_records(positions: list[EngPosition]) -> list[dict[str, Any]]:
@@ -144,7 +167,7 @@ def get_audit(db: Session, interval: Interval, client: ChainClient | None = None
         .all()
     )
     trades = db.query(Trade).filter(Trade.interval_id == interval.id).all()
-    eng = build_engine_positions(db, interval)
+    eng, _params, _prev = engine_inputs(db, interval)
 
     on_input: Optional[str] = None
     on_result: Optional[str] = None
@@ -182,7 +205,23 @@ def get_audit(db: Session, interval: Interval, client: ChainClient | None = None
             for t in trades
         ],
         "input_root": _triple(interval.input_root, input_root(eng) if eng else None, on_input),
-        "result_hash": _triple(interval.result_hash, None, on_result),
+        # Recomputable from the published integer trades + p_ref (same encoding the engine
+        # hashes), so anyone can check the posted result hash against the trade list.
+        "result_hash": _triple(
+            interval.result_hash,
+            result_hash(
+                [
+                    SimpleNamespace(
+                        buyer_id=t.buyer_id, seller_id=t.seller_id, qty_wh=t.qty_wh, price=t.price_paise
+                    )
+                    for t in trades
+                ],
+                interval.p_ref_paise,
+            )
+            if interval.p_ref_paise is not None
+            else None,
+            on_result,
+        ),
         "merkle_leaves": merkle_leaf_records(eng),
         "explorer": explorer_links(interval.id, client),
     }
@@ -194,19 +233,8 @@ def rerun_audit(db: Session, interval: Interval, client: ChainClient | None = No
     if interval.result_hash is None:
         raise ValueError("interval has not been cleared yet")
 
-    params = load_market_params(db)
     feeder = load_feeder(db)
-    eng = build_engine_positions(db, interval)
-
-    prev_p: Optional[float] = None
-    prev_iv = (
-        db.query(Interval)
-        .filter(Interval.id < interval.id, Interval.p_ref_paise.isnot(None))
-        .order_by(desc(Interval.id))
-        .first()
-    )
-    if prev_iv is not None and prev_iv.p_ref_paise is not None:
-        prev_p = float(prev_iv.p_ref_paise)
+    eng, params, prev_p = engine_inputs(db, interval)
 
     result = clear_interval(eng, feeder, params, prev_p)
 

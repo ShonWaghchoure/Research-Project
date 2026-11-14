@@ -196,3 +196,11 @@ def test_clearing_benchmark(n: int, capsys: pytest.CaptureFixture[str]) -> None:
     print(f"clearing_benchmark n={n} elapsed_s={elapsed:.3f} trades={len(result.trades)}")
     assert elapsed < 10.0  # well under "a few seconds" with headroom for CI
     assert result.result_hash.startswith("0x")
+
+
+def test_kwh_to_wh_floor_does_not_lose_a_watt_hour():
+    """Bug fix: float round-trip floored e.g. 1001 Wh to 1000 Wh (1,482 of 1..200,000)."""
+    from app.engine.clearing import _kwh_to_wh_floor
+
+    assert all(_kwh_to_wh_floor(q / 1000.0) == q for q in range(1, 200_001))
+    assert _kwh_to_wh_floor(1.2345678) == 1234  # genuine fractions still floor

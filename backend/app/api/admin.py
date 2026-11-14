@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.api import attacks_service
 from app.api.deps import require_admin
-from app.core.config_store import get_config_map, update_config
+from app.core.config_store import (
+    PARAM_KEYS,
+    default_config_map,
+    get_config_map,
+    update_config,
+    validate_config,
+)
 from app.db.deps import get_db
 from app.db.models import (
     AttackRun,
@@ -47,6 +53,11 @@ def put_config(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ConfigMap:
+    current = {k: v for k, v in get_config_map(db).items() if k in PARAM_KEYS}
+    merged = {**default_config_map(), **current, **body.values}
+    problems = validate_config(merged)
+    if problems:
+        raise HTTPException(status_code=422, detail=problems)
     before, after = update_config(db, body.values, updated_by=user.id)
     db.add(
         AuditLog(

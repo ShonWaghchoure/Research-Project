@@ -79,12 +79,14 @@ def reputation_leaf(address: str, score_bp: int, evidence_count: int) -> str:
     return "0x" + keccak(packed).hex()
 
 
-def shortfall_leaf(interval_id: int, address: str, shortfall_wh: int) -> str:
-    """keccak256(abi.encode(intervalId, participant, shortfallWh))."""
-    addr: ChecksumAddress = to_checksum_address(address)
+def shortfall_leaf(interval_id: int, seller: str, buyer: str, shortfall_wh: int) -> str:
+    """keccak256(abi.encode(intervalId, seller, buyer, shortfallWh)) — one leaf per
+    (seller, buyer) pair, matching Settlement.settleShortfall."""
+    s: ChecksumAddress = to_checksum_address(seller)
+    b: ChecksumAddress = to_checksum_address(buyer)
     encoded = encode(
-        ["uint256", "address", "uint64"],
-        [int(interval_id), addr, int(shortfall_wh)],
+        ["uint256", "address", "address", "uint64"],
+        [int(interval_id), s, b, int(shortfall_wh)],
     )
     return "0x" + keccak(encoded).hex()
 

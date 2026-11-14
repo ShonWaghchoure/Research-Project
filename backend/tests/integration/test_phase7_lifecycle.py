@@ -185,8 +185,21 @@ def test_three_intervals_with_bots() -> None:
         # score_bp should be below a fresh prior (initial ~3333 bp for Beta(1,2))
         assert scores[-1].score_bp < 4000
 
-        stake = int(client.registry.functions.getParticipant(lazy_addr).call()[0])
-        assert stake < 10_000, f"expected slash, stake still {stake}"
+        # The lazy bot is slashed once per short-changed buyer, and bots now top their stake
+        # back up after a slash, so check the on-chain history rather than one snapshot.
+        reg_events = client.registry.events
+        staked = sum(
+            int(e["args"]["amount"])
+            for e in reg_events.Staked.get_logs(from_block=0, argument_filters={"participant": lazy_addr})
+        )
+        slashed = sum(
+            int(e["args"]["amount"])
+            for e in reg_events.Slashed.get_logs(from_block=0, argument_filters={"participant": lazy_addr})
+        )
+        p = client.registry.functions.getParticipant(lazy_addr).call()
+        stake, pending = int(p[0]), int(p[1])
+        assert slashed > 0, "expected the lazy seller to be slashed"
+        assert stake + pending == staked - slashed, (stake, pending, staked, slashed)
 
         # Merkle proof verifies against on-chain ReputationAnchor root
         proof_iv = metered_ids[2]

@@ -107,6 +107,380 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Flags */
+        get: operations["list_flags_admin_flags_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/flags/{flag_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Flag */
+        post: operations["resolve_flag_admin_flags__flag_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/attacks/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Attack */
+        post: operations["run_attack_admin_attacks_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/simulation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Simulation */
+        get: operations["get_simulation_admin_simulation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/simulation/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Simulation */
+        post: operations["start_simulation_admin_simulation_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/simulation/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Simulation */
+        post: operations["stop_simulation_admin_simulation_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/simulation/speed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Simulation Speed */
+        put: operations["set_simulation_speed_admin_simulation_speed_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Audit Log */
+        get: operations["list_audit_log_admin_audit_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/{interval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Audit Report */
+        get: operations["get_audit_report_audit__interval_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/{interval_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rerun Audit */
+        post: operations["rerun_audit_audit__interval_id__rerun_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/intervals/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Interval */
+        get: operations["get_current_interval_intervals_current_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/intervals/{interval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Interval */
+        get: operations["get_interval_intervals__interval_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/price-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Price History */
+        get: operations["price_history_price_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Position */
+        post: operations["create_position_positions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/positions/{position_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reveal Position */
+        post: operations["reveal_position_positions__position_id__reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/positions/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Positions */
+        get: operations["my_positions_positions_mine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orderbook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Orderbook */
+        get: operations["orderbook_orderbook_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Trades */
+        get: operations["list_trades_trades_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trades/{trade_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Trade */
+        get: operations["get_trade_trades__trade_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reputation/{address}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Reputation */
+        get: operations["get_reputation_reputation__address__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reputation/{address}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reputation History */
+        get: operations["reputation_history_reputation__address__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reputation/{address}/proof": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reputation Proof */
+        get: operations["reputation_proof_reputation__address__proof_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -128,6 +502,197 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AttackRunRequest */
+        AttackRunRequest: {
+            /**
+             * Scenario
+             * @enum {string}
+             */
+            scenario: "sybil_farm" | "collusion_ring" | "price_manipulation" | "false_reports" | "defect_after_trust";
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Defenses
+             * @default on
+             * @enum {string}
+             */
+            defenses: "on" | "off";
+        };
+        /** AttackRunResult */
+        AttackRunResult: {
+            /** Id */
+            id: number;
+            /** Scenario */
+            scenario: string;
+            /** Defenses */
+            defenses: boolean;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /** Summary */
+            summary: {
+                [key: string]: unknown;
+            };
+            /** Series */
+            series?: components["schemas"]["AttackSeriesPoint"][];
+            /**
+             * Attacker Profit Paise
+             * @default 0
+             */
+            attacker_profit_paise: number;
+            /**
+             * Plain Summary
+             * @default
+             */
+            plain_summary: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** AttackSeriesPoint */
+        AttackSeriesPoint: {
+            /** Interval */
+            interval: number;
+            /** P Ref */
+            p_ref?: number | null;
+            /** Sdr */
+            sdr?: number | null;
+            /** Jain */
+            jain?: number | null;
+            /** Gini */
+            gini?: number | null;
+            /** Hhi */
+            hhi?: number | null;
+            /** Mean Reputation */
+            mean_reputation?: number | null;
+        };
+        /** AuditLogOut */
+        AuditLogOut: {
+            /** Id */
+            id: number;
+            /** Actor User Id */
+            actor_user_id?: number | null;
+            /** Action */
+            action: string;
+            /** Resource Type */
+            resource_type: string;
+            /** Resource Id */
+            resource_id?: string | null;
+            /** Before */
+            before?: {
+                [key: string]: unknown;
+            } | null;
+            /** After */
+            after?: {
+                [key: string]: unknown;
+            } | null;
+            /** Ip */
+            ip?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** AuditPosition */
+        AuditPosition: {
+            /** Participant Id */
+            participant_id: number;
+            /** Side */
+            side: string;
+            /** Qty Wh */
+            qty_wh: number;
+            /** Limit Price Paise */
+            limit_price_paise: number;
+            /** Revealed */
+            revealed: boolean;
+        };
+        /** AuditReport */
+        AuditReport: {
+            /** Interval Id */
+            interval_id: number;
+            /** State */
+            state: string;
+            /** Engine Version */
+            engine_version?: string | null;
+            /** P Ref Paise */
+            p_ref_paise?: number | null;
+            /** Sdr */
+            sdr?: number | null;
+            /** Positions */
+            positions?: components["schemas"]["AuditPosition"][];
+            /** Trades */
+            trades?: components["schemas"]["AuditTrade"][];
+            input_root: components["schemas"]["HashTriple"];
+            result_hash: components["schemas"]["HashTriple"];
+            /** Merkle Leaves */
+            merkle_leaves?: {
+                [key: string]: unknown;
+            }[];
+            /** Explorer */
+            explorer?: {
+                [key: string]: string | null;
+            };
+        };
+        /** AuditRerunResponse */
+        AuditRerunResponse: {
+            /** Interval Id */
+            interval_id: number;
+            /** Engine Version Stored */
+            engine_version_stored?: string | null;
+            /** Engine Version Now */
+            engine_version_now: string;
+            input_root: components["schemas"]["HashTriple"];
+            result_hash: components["schemas"]["HashTriple"];
+            /** Match */
+            match: boolean;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** AuditTrade */
+        AuditTrade: {
+            /** Buyer Id */
+            buyer_id: number;
+            /** Seller Id */
+            seller_id: number;
+            /** Qty Wh */
+            qty_wh: number;
+            /** Price Paise */
+            price_paise: number;
+        };
+        /** CommitData */
+        CommitData: {
+            /** Position Id */
+            position_id: number;
+            /** Id */
+            id: number;
+            /** Interval Id */
+            interval_id: number;
+            /** Commit Hash */
+            commit_hash: string;
+            /** Salt */
+            salt: string;
+            /** Side */
+            side: string;
+            /** Qty Wh */
+            qty_wh: number;
+            /** Limit Price Paise */
+            limit_price_paise: number;
+            /** Deadline */
+            deadline: number;
+            /** Participant */
+            participant: string;
+        };
         /**
          * ConfigMap
          * @description All market config keys as a flat map.
@@ -145,10 +710,92 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** FlagOut */
+        FlagOut: {
+            /** Id */
+            id: number;
+            /** Participant Id */
+            participant_id?: number | null;
+            /** Interval Id */
+            interval_id?: number | null;
+            /** Kind */
+            kind: string;
+            /** Severity */
+            severity: string;
+            /** Status */
+            status: string;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Resolved By */
+            resolved_by?: number | null;
+        };
+        /** FlagResolve */
+        FlagResolve: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "resolved" | "dismissed";
+            /** Note */
+            note?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HashTriple */
+        HashTriple: {
+            /** Stored */
+            stored?: string | null;
+            /** Recomputed */
+            recomputed?: string | null;
+            /** On Chain */
+            on_chain?: string | null;
+            /** Stored Matches Recomputed */
+            stored_matches_recomputed?: boolean | null;
+            /** Stored Matches On Chain */
+            stored_matches_on_chain?: boolean | null;
+            /** Recomputed Matches On Chain */
+            recomputed_matches_on_chain?: boolean | null;
+        };
+        /** IntervalOut */
+        IntervalOut: {
+            /** Id */
+            id: number;
+            /** State */
+            state: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** P Ref Paise */
+            p_ref_paise?: number | null;
+            /** Sdr */
+            sdr?: number | null;
+            /** Input Root */
+            input_root?: string | null;
+            /** Result Hash */
+            result_hash?: string | null;
+            /** Delivery Root */
+            delivery_root?: string | null;
+            /** Engine Version */
+            engine_version?: string | null;
         };
         /** MeResponse */
         MeResponse: {
@@ -175,6 +822,22 @@ export interface components {
             message: string;
             /** Chain Id */
             chain_id: number;
+        };
+        /** OrderbookLevel */
+        OrderbookLevel: {
+            /** Side */
+            side: string;
+            /** Total Qty Wh */
+            total_qty_wh: number;
+            /** Count */
+            count: number;
+        };
+        /** OrderbookOut */
+        OrderbookOut: {
+            /** Interval Id */
+            interval_id: number;
+            /** Levels */
+            levels: components["schemas"]["OrderbookLevel"][];
         };
         /** ParticipantCreate */
         ParticipantCreate: {
@@ -256,6 +919,100 @@ export interface components {
             /** Active */
             active?: boolean | null;
         };
+        /** PositionCreate */
+        PositionCreate: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Qty Wh */
+            qty_wh: number;
+            /** Limit Price Paise */
+            limit_price_paise: number;
+            /** Deadline */
+            deadline?: number | null;
+            /** Salt */
+            salt?: string | null;
+        };
+        /** PositionOut */
+        PositionOut: {
+            /** Id */
+            id: number;
+            /** Interval Id */
+            interval_id: number;
+            /** Side */
+            side: string;
+            /** Qty Wh */
+            qty_wh: number;
+            /** Limit Price Paise */
+            limit_price_paise: number;
+            /** Commit Hash */
+            commit_hash?: string | null;
+            /** Revealed */
+            revealed: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ReputationHistoryOut */
+        ReputationHistoryOut: {
+            /** Address */
+            address: string;
+            /** History */
+            history: components["schemas"]["ReputationOut"][];
+        };
+        /** ReputationOut */
+        ReputationOut: {
+            /** Address */
+            address: string;
+            /** Interval Id */
+            interval_id?: number | null;
+            /** Score Bp */
+            score_bp: number;
+            /** Evidence Count */
+            evidence_count: number;
+            /** Alpha */
+            alpha: number;
+            /** Beta */
+            beta: number;
+            /** Tier */
+            tier: string;
+            /** Leaf Hash */
+            leaf_hash?: string | null;
+        };
+        /** ReputationProofOut */
+        ReputationProofOut: {
+            /** Address */
+            address: string;
+            /** Interval Id */
+            interval_id: number;
+            /** Score Bp */
+            score_bp: number;
+            /** Evidence Count */
+            evidence_count: number;
+            /** Leaf Hash */
+            leaf_hash: string;
+            /** Proof */
+            proof: string[];
+            /** Root */
+            root: string;
+        };
+        /**
+         * RevealIn
+         * @description Optional salt confirmation; server already stores salt privately.
+         */
+        RevealIn: {
+            /** Salt */
+            salt?: string | null;
+        };
+        /** SimSpeedUpdate */
+        SimSpeedUpdate: {
+            /** Interval Seconds */
+            interval_seconds: number;
+        };
         /** TokenResponse */
         TokenResponse: {
             /** Access Token */
@@ -269,6 +1026,26 @@ export interface components {
             role: string;
             /** Address */
             address: string;
+        };
+        /** TradeOut */
+        TradeOut: {
+            /** Id */
+            id: number;
+            /** Interval Id */
+            interval_id: number;
+            /** Buyer Id */
+            buyer_id: number;
+            /** Seller Id */
+            seller_id: number;
+            /** Qty Wh */
+            qty_wh: number;
+            /** Price Paise */
+            price_paise: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -495,6 +1272,647 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigMap"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_flags_admin_flags_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_flag_admin_flags__flag_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlagResolve"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_attack_admin_attacks_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttackRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttackRunResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_simulation_admin_simulation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    start_simulation_admin_simulation_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    stop_simulation_admin_simulation_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    set_simulation_speed_admin_simulation_speed_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimSpeedUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_audit_log_admin_audit_log_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_audit_report_audit__interval_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interval_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_audit_audit__interval_id__rerun_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interval_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditRerunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_current_interval_intervals_current_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntervalOut"];
+                };
+            };
+        };
+    };
+    get_interval_intervals__interval_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interval_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntervalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    price_history_price_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntervalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_position_positions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PositionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommitData"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reveal_position_positions__position_id__reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                position_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevealIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_positions_positions_mine_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionOut"][];
+                };
+            };
+        };
+    };
+    orderbook_orderbook_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderbookOut"];
+                };
+            };
+        };
+    };
+    list_trades_trades_get: {
+        parameters: {
+            query?: {
+                interval_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trade_trades__trade_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trade_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reputation_reputation__address__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReputationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reputation_history_reputation__address__history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReputationHistoryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reputation_proof_reputation__address__proof_get: {
+        parameters: {
+            query: {
+                interval_id: number;
+            };
+            header?: never;
+            path: {
+                address: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReputationProofOut"];
                 };
             };
             /** @description Validation Error */

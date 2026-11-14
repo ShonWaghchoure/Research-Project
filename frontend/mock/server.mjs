@@ -27,7 +27,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8001);
 const INTERVAL_SECONDS = Number(process.env.MOCK_INTERVAL_SECONDS ?? 60);
 const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
-const OPERATOR_PK = process.env.OPERATOR_PRIVATE_KEY ?? "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const HARDHAT_KEY_0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const OPERATOR_PK = process.env.OPERATOR_PRIVATE_KEY ?? HARDHAT_KEY_0;
+// Security: this mock is a local development tool. By default it listens on loopback only,
+// accepts browser requests only from the local frontend, and refuses to sign with the
+// public Hardhat key against anything but a local node.
+const HOST = process.env.MOCK_HOST ?? "127.0.0.1";
+const DEV_LOGIN = process.env.MOCK_DEV_LOGIN === "1";
+const CORS_ORIGINS = (process.env.MOCK_CORS_ORIGINS ?? "http://localhost:3000,http://127.0.0.1:3000").split(",").map((o) => o.trim()).filter(Boolean);
+const TOKEN_TTL_MS = 60 * 60 * 1000;
+const NONCE_TTL_MS = 5 * 60 * 1000;
+const MAX_USERS = 10_000;
+const MAX_TOKENS = 10_000;
+const MAX_BODY_BYTES = 64 * 1024;
+if (OPERATOR_PK.toLowerCase() === HARDHAT_KEY_0 && !/^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(RPC_URL)) {
+  console.error("[mock] refusing to use the public Hardhat key against a non-local RPC; set OPERATOR_PRIVATE_KEY");
+  process.exit(1);
+}
 
 const deployments = JSON.parse(readFileSync(path.join(__dirname, "..", "src", "contracts", "localhost.json"), "utf8"));
 const SETTLEMENT = deployments.contracts.Settlement;
@@ -78,7 +94,14 @@ async function onChainCommit(intervalId, address) {
 
 // ---- state --------------------------------------------------------------------
 const users = new Map(); // address -> { id, address, role, nonce, nonceUsed, participant }
-const tokens = new Map(); // token -> address
+const tokens = new Map(); // token -> { address, exp }
+
+function issueToken(address) {
+  if (tokens.size >= MAX_TOKENS) tokens.delete(tokens.keys().next().value); // evict oldest
+  const tok = `mock.${randomBytes(24).toString("hex")}`;
+  tokens.set(tok, { address, exp: Date.now() + TOKEN_TTL_MS });
+  return tok;
+}
 const positions = []; // user positions
 const trades = [];
 const priceHistory = [];
@@ -568,16 +591,21 @@ class HttpError extends Error {
 }
 
 function json(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,OPTIONS" });
+  const headers = { "Content-Type": "application/json", "Access-Control-Allow-Headers": "Authorization, Content-Type", "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,OPTIONS", Vary: "Origin" };
+  if (res.corsOrigin) headers["Access-Control-Allow-Origin"] = res.corsOrigin;
+  res.writeHead(status, headers);
   res.end(body === undefined ? "" : JSON.stringify(body));
 }
 
 function auth(req) {
   const h = req.headers.authorization ?? "";
   const tok = h.startsWith("Bearer ") ? h.slice(7) : null;
-  const address = tok && tokens.get(tok);
-  if (!address) throw new HttpError(401, "not authenticated");
-  return users.get(address);
+  const entry = tok && tokens.get(tok);
+  if (!entry || entry.exp < Date.now()) {
+    if (entry) tokens.delete(tok);
+    throw new HttpError(401, "not authenticated");
+  }
+  return users.get(entry.address);
 }
 
 function requireAdmin(req) {
@@ -673,10 +701,18 @@ function seedPhase10() {
 }
 
 async function readBody(req) {
+  // Count bytes while streaming: buffering first would let one huge POST exhaust memory.
   const chunks = [];
-  for await (const c of req) chunks.push(c);
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > MAX_BODY_BYTES) {
+      req.destroy();
+      throw new HttpError(413, "request too large");
+    }
+    chunks.push(c);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
-  if (raw.length > 64 * 1024) throw new HttpError(413, "request too large");
   return raw ? JSON.parse(raw) : {};
 }
 
@@ -694,6 +730,7 @@ async function route(req, res) {
     const { address } = await readBody(req);
     let addr;
     try { addr = getAddress(address); } catch { throw new HttpError(422, "invalid address"); }
+    if (!users.has(addr) && users.size >= MAX_USERS) throw new HttpError(503, "too many users");
     if (!users.has(addr)) {
       const role = addr === HARDHAT_ADMIN ? "admin" : "participant";
       users.set(addr, { id: users.size + 1, address: addr, role, participant: null });
@@ -701,32 +738,36 @@ async function route(req, res) {
     const u = users.get(addr);
     u.nonce = randomBytes(16).toString("hex");
     u.nonceUsed = false;
-    return json(res, 200, { address: addr, nonce: u.nonce, message: siweMessage(addr, u.nonce), chain_id: 31337 });
+    u.nonceIssued = Date.now();
+    u.message = siweMessage(addr, u.nonce);
+    return json(res, 200, { address: addr, nonce: u.nonce, message: u.message, chain_id: 31337 });
   }
   // Mock-only helper for Playwright: mint an admin JWT without a wallet signature.
   if (p === "/auth/dev-login" && m === "POST") {
+    if (!DEV_LOGIN) throw new HttpError(404, "not found"); // only with MOCK_DEV_LOGIN=1 (tests)
     const body = await readBody(req);
     const role = body.role === "operator" ? "operator" : "admin";
-    const addr = HARDHAT_ADMIN;
+    let addr = HARDHAT_ADMIN;
+    if (body.address) {
+      try { addr = getAddress(body.address); } catch { throw new HttpError(422, "invalid address"); }
+    }
     if (!users.has(addr)) users.set(addr, { id: users.size + 1, address: addr, role, participant: null });
     const u = users.get(addr);
     u.role = role;
-    const tok = `mock.${randomBytes(24).toString("hex")}`;
-    tokens.set(tok, addr);
-    return json(res, 200, { access_token: tok, token_type: "bearer", role: u.role, address: addr });
+    return json(res, 200, { access_token: issueToken(addr), token_type: "bearer", role: u.role, address: addr });
   }
   if (p === "/auth/verify" && m === "POST") {
     const { address, message, signature } = await readBody(req);
     const addr = getAddress(address);
     const u = users.get(addr);
     if (!u || !u.nonce || u.nonceUsed) throw new HttpError(401, "nonce required");
-    if (!message.includes(`Nonce: ${u.nonce}`)) throw new HttpError(401, "nonce mismatch");
+    // Same rule as the backend: only the exact message issued, before it expires.
+    if (Date.now() - (u.nonceIssued ?? 0) > NONCE_TTL_MS) throw new HttpError(401, "sign-in message expired, request a new one");
+    if (message !== u.message) throw new HttpError(401, "message does not match the one issued");
     const ok = await verifyMessage({ address: addr, message, signature });
     if (!ok) throw new HttpError(401, "signature does not match address");
     u.nonceUsed = true;
-    const tok = `mock.${randomBytes(24).toString("hex")}`;
-    tokens.set(tok, addr);
-    return json(res, 200, { access_token: tok, token_type: "bearer", role: u.role, address: addr });
+    return json(res, 200, { access_token: issueToken(addr), token_type: "bearer", role: u.role, address: addr });
   }
   if (p === "/me" && m === "GET") {
     const u = auth(req);
@@ -1033,6 +1074,8 @@ function posOut(pos) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && CORS_ORIGINS.includes(origin)) res.corsOrigin = origin;
   try {
     await route(req, res);
   } catch (e) {
@@ -1044,7 +1087,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 // ---- websocket ---------------------------------------------------------------------
-const wss = new WebSocketServer({ server, path: "/ws" });
+const wss = new WebSocketServer({
+  server,
+  path: "/ws",
+  maxPayload: 4 * 1024,
+  // Browsers always send Origin; refuse other sites. Non-browser clients (tests) send none.
+  verifyClient: ({ origin }) => !origin || CORS_ORIGINS.includes(origin),
+});
 function broadcast(channel, type, data) {
   const msg = JSON.stringify({ channel, type, data });
   for (const c of wss.clients) if (c.readyState === 1) c.send(msg);
@@ -1060,6 +1109,6 @@ seedPhase10();
 await seedReputationProof();
 newInterval();
 setInterval(tick, 500);
-server.listen(PORT, () => {
-  console.log(`[mock] Phase 7/9/10 mock API on http://localhost:${PORT} (ws: /ws), interval ${INTERVAL_SECONDS}s, chain ${chainOk ? "connected" : "unreachable (chain-less mode)"}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[mock] Phase 7/9/10 mock API on http://${HOST}:${PORT} (ws: /ws), interval ${INTERVAL_SECONDS}s, chain ${chainOk ? "connected" : "unreachable (chain-less mode)"}`);
 });

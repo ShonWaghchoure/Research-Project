@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: energy_trading
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432" # loopback only: known password
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +23,7 @@ services:
     container_name: ft-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379" # loopback only: no auth
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -40,7 +40,7 @@ services:
       - ./contracts:/contracts
     command: ["bash", "-lc", "npm ci && npx hardhat node --hostname 0.0.0.0 --port 8545"]
     ports:
-      - "8545:8545"
+      - "127.0.0.1:8545:8545" # loopback only: account 0 (operator) is unlocked
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',method:'eth_chainId',params:[],id:1})}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s

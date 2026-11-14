@@ -17,6 +17,10 @@ echo "INTERVAL_SECONDS=$INTERVAL_SECONDS DEMO_BOT_COUNT=$DEMO_BOT_COUNT"
 if [ ! -f .env ]; then
   echo "Creating .env from .env.example…"
   cp .env.example .env
+  # Never run with the JWT secret published in .env.example: anyone could forge tokens.
+  secret=$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')
+  sed -i.bak "s/^JWT_SECRET=.*/JWT_SECRET=$secret/" .env && rm -f .env.bak
+  echo "Generated a random JWT_SECRET in .env"
 fi
 
 # Ensure frontend env points at the live API (not the mock).

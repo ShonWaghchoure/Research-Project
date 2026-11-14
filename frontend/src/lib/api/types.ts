@@ -74,7 +74,8 @@ export interface Position {
   deadline: number;
   salt: `0x${string}`;
   commit_hash: `0x${string}`;
-  committed_tx: string | null;
+  /** Client-side only: set once the commit is known to be on chain. The API does not return it. */
+  committed_tx?: string | null;
   revealed: boolean;
   created_at: string;
 }
