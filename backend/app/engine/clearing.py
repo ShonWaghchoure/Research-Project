@@ -194,9 +194,13 @@ def clear_interval(
     feeder: Feeder,
     params: MarketParams,
     prev_p_ref: float | None,
+    *,
+    apply_median_cap: bool = True,
 ) -> ClearingResult:
     """Price → match → integerize → hash."""
-    price = compute_reference_price(positions, prev_p_ref, params)
+    price = compute_reference_price(
+        positions, prev_p_ref, params, apply_median_cap=apply_median_cap
+    )
     matched = match_orders(positions, feeder, price.p_ref, price.sdr, params)
     cleared = _largest_remainder_repair(
         matched.trades, positions, price.p_ref, feeder, params

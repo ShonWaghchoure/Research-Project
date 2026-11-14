@@ -1,4 +1,4 @@
-.PHONY: dev test lint reset-db gen-api
+.PHONY: dev test lint reset-db gen-api experiments-smoke experiments-plot
 
 BACKEND_DIR  := backend
 FRONTEND_DIR := frontend
@@ -51,3 +51,10 @@ reset-db:
 # ─── OpenAPI → TypeScript client ────────────────────────────────────────────
 gen-api:
 	bash $(BACKEND_DIR)/scripts/gen_ts_client.sh
+
+# ─── Phase 11 experiments ───────────────────────────────────────────────────
+experiments-smoke:
+	cd experiments && ../backend/.venv/bin/python run_all.py
+
+experiments-plot:
+	cd experiments && ../backend/.venv/bin/python figures/plot_all.py

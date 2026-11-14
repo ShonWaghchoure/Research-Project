@@ -23,7 +23,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **8** | Frontend foundation | ✅ **Done** |
 | **9** | Frontend market views | ✅ **Done** |
 | **10** | Attack lab, audit, admin | ✅ **Done** |
-| 11 | Experiments | ⬜ Pending |
+| **11** | Experiments | ✅ **Done** |
 | 12 | Hardening, deploy, docs | ⬜ Pending |
 
 ---
@@ -64,7 +64,7 @@ fair-and-trustworthy/
 ├── frontend/                 # Next.js 14 App Router + wagmi 2 + Tailwind
 │   └── src/app/              # Pages: dashboard, trade, market, grid, reputation,
 │                             #        fairness, attack, audit, admin, status
-├── experiments/              # Phase 11: E1–E10 runners + notebooks (in progress)
+├── experiments/              # Phase 11: E1–E10 runners, figures, notebooks
 ├── docker-compose.yml        # postgres:16-alpine (port 5433) + redis:7-alpine
 ├── Makefile                  # dev · test · lint · reset-db
 ├── .env.example              # all required variables
@@ -81,11 +81,13 @@ fair-and-trustworthy/
 ## Make Targets
 
 ```bash
-make dev        # docker up → hardhat node → deploy contracts → backend → frontend
-make test       # contracts (hardhat) + backend (pytest) + frontend (next build)
-make lint       # ruff + mypy + next lint
-make reset-db   # wipe volumes, re-migrate, seed demo participants
-make gen-api    # OpenAPI → frontend/src/api/schema.d.ts
+make dev                # docker up → hardhat node → deploy contracts → backend → frontend
+make test               # contracts (hardhat) + backend (pytest) + frontend (next build)
+make lint               # ruff + mypy + next lint
+make reset-db           # wipe volumes, re-migrate, seed demo participants
+make gen-api            # OpenAPI → frontend/src/api/schema.d.ts
+make experiments-smoke  # Phase 11 E1–E10 smoke matrix → results/phase11/
+make experiments-plot   # regenerate figures from saved metrics.csv
 ```
 
 ---
@@ -505,6 +507,38 @@ Built:
   admin (ConfigEditor, FlagQueue, SimControls, AuditLogTable),
   mock Phase 10 routes + `POST /auth/dev-login` for Playwright
 - Decisions: `docs/DECISIONS.md` (Phase 10)
+
+---
+
+## Phase 11 Smoke Test Results
+
+Research matrix E1–E10 wraps the Phase 4 simulator. Smoke mode is the default
+(`make experiments-smoke`); paper scale is `python run_all.py --paper` (hours).
+Figures regenerate from CSVs only — see [`docs/RESULTS.md`](docs/RESULTS.md).
+
+```
+pytest tests/sim/test_phase11_overrides.py -q
+  → 3 passed (scenario/bot overrides + ablation smoke run)
+
+cd experiments && python run_all.py          # --smoke by default
+  → metrics.csv + manifest.json under results/phase11/e1_honest … e10_ablations
+
+python figures/plot_all.py
+  → results/phase11/figures/e1_*.png … e10_ablations.png
+
+Paper defaults (GEMINI.md): 30 seeds × 7 days × {50,100,200} participants
+Smoke defaults: 1 seed, 20 participants, ≤24 intervals, unsigned meters
+```
+
+Built:
+- `experiments/{e1_honest…e10_ablations,common,run_all}.py` — matrices + harness
+- `experiments/figures/{plot_utils,plot_all}.py` — mean ± 95% CI bar charts
+- `experiments/notebooks/*.ipynb` — one notebook per experiment (CSV → figure)
+- `experiments/configs/{smoke,paper}.json` — documented defaults
+- Sim knobs: `SimConfig.scenario_overrides`, `bot_param_overrides`, ablation flags
+  (`apply_median_cap` / `apply_lcb` / `apply_forgetting` / `apply_fairness_term` /
+  `apply_collusion_detector`)
+- Docs: `docs/RESULTS.md`, `docs/DECISIONS.md` (Phase 11)
 
 ---
 

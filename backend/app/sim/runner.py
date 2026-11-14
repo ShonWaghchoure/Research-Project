@@ -90,6 +90,16 @@ class SimConfig:
     sign_meters: bool = True
     # Cap total intervals (Phase 10 attack lab / tests). None = days * SLOTS_PER_DAY.
     max_intervals: Optional[int] = None
+    # Phase 11: shallow Scenario field overrides (sybil_count, capacity_kw, …)
+    # and bot_param overrides applied to every BotSpec (withhold, inflate, after, …).
+    scenario_overrides: Dict[str, Any] = field(default_factory=dict)
+    bot_param_overrides: Dict[str, Any] = field(default_factory=dict)
+    # Phase 11 E10 ablations (True = full system behaviour).
+    apply_median_cap: bool = True
+    apply_lcb: bool = True
+    apply_forgetting: bool = True
+    apply_fairness_term: bool = True
+    apply_collusion_detector: bool = True
 
 
 @dataclass
@@ -267,6 +277,23 @@ def build_feeder(sc: Scenario) -> Feeder:
 # ─── simulation ────────────────────────────────────────────────────────────────
 
 
+def resolve_scenario(cfg: SimConfig) -> Scenario:
+    """Apply Phase 11 scenario / bot-param overrides onto a registered scenario."""
+    sc = get(cfg.scenario)
+    overrides = dict(cfg.scenario_overrides or {})
+    bot_params = dict(cfg.bot_param_overrides or {})
+    if overrides:
+        # Only known Scenario fields; ignore unknown keys so configs stay forward-compatible.
+        allowed = {f.name for f in sc.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        sc = replace(sc, **{k: v for k, v in overrides.items() if k in allowed and k != "bots"})
+    if bot_params and sc.bots:
+        new_bots = tuple(
+            replace(b, params={**b.params, **bot_params}) for b in sc.bots
+        )
+        sc = replace(sc, bots=new_bots)
+    return sc
+
+
 @dataclass
 class _Plan:
     """One participant's interval plan: forecast position plus the physical outcome."""
@@ -278,10 +305,21 @@ class _Plan:
 
 
 def run(cfg: SimConfig, out_dir: str | Path) -> Dict[str, Any]:
-    sc = get(cfg.scenario)
+    sc = resolve_scenario(cfg)
     if cfg.mode not in baselines.MODES:
         raise ValueError(f"mode must be one of {baselines.MODES}")
     params = replace(DEFAULT_PARAMS, **sc.params_overrides) if sc.params_overrides else DEFAULT_PARAMS
+    # E10 ablations via MarketParams / ReputationParams knobs.
+    param_kw: Dict[str, Any] = {}
+    if not cfg.apply_fairness_term:
+        param_kw["beta"] = 0.0
+    if not cfg.apply_lcb:
+        param_kw["z"] = 0.0
+    if not cfg.apply_forgetting:
+        # phi → 1: effectively disable exponential forgetting.
+        param_kw["half_life_intervals"] = 10**9
+    if param_kw:
+        params = replace(params, **param_kw)
     rparams = ReputationParams.from_market(params)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -346,7 +384,15 @@ def run(cfg: SimConfig, out_dir: str | Path) -> Dict[str, Any]:
         # 4. clear --------------------------------------------------------------
         t0 = time.perf_counter()
         if positions:
-            res = baselines.clear(cfg.mode, positions, feeder, params, prev_p_ref, b1_rng)
+            res = baselines.clear(
+                cfg.mode,
+                positions,
+                feeder,
+                params,
+                prev_p_ref,
+                b1_rng,
+                apply_median_cap=cfg.apply_median_cap,
+            )
             prev_p_ref = res.p_ref
         else:
             res = baselines.clear_b0([], feeder, params)
@@ -487,8 +533,10 @@ def run(cfg: SimConfig, out_dir: str | Path) -> Dict[str, Any]:
             window = [w for w in window if w.interval > lo]
             records = [(i, r) for i, r in records if i > lo]
             flags: List[Flag] = []
-            c_scores, cflags = collusion_flags(window, rparams, seed=cfg.seed)
-            flags += cflags
+            c_scores: Dict[str, float] = {}
+            if cfg.apply_collusion_detector:
+                c_scores, cflags = collusion_flags(window, rparams, seed=cfg.seed)
+                flags += cflags
             a_scores = anomaly_scores(build_features((r for _, r in records), corridor), seed=cfg.seed)
             flags += anomaly_flags(a_scores)
             since = t - cfg.detection_every
@@ -499,7 +547,7 @@ def run(cfg: SimConfig, out_dir: str | Path) -> Dict[str, Any]:
             if recent_bal:
                 flags.append(Flag("energy_imbalance", "medium", (), {"intervals": len(recent_bal), "max_mismatch_kwh": round(max(recent_bal), 6)}))
             for p in people:
-                p.c_i = c_scores.get(p.pid, 0.0)
+                p.c_i = c_scores.get(p.pid, 0.0) if cfg.apply_collusion_detector else 0.0
                 # a_i persists until the next detection pass: worst of behaviour anomaly and
                 # the false-report (PV plausibility) score seen in this window
                 p.a_i = honesty_anomaly(a_scores.get(p.pid, 0.0), recent_pv.get(p.pid, 0.0))

@@ -1,0 +1,8 @@
+{
+  "seeds": 30,
+  "seed_base": 1000,
+  "days": 7,
+  "participants": [50, 100, 200],
+  "sign_meters": true,
+  "notes": "GEMINI.md Phase 11 paper defaults. Invoke via experiment scripts without --smoke."
+}

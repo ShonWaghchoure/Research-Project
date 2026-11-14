@@ -386,3 +386,28 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 5. **Admin nav is role-filtered.** The `/admin` nav item and page content require `role === "admin"`.
    Attack lab is visible to everyone but run buttons require an admin JWT. The mock API adds
    `POST /auth/dev-login` for Playwright only.
+
+---
+
+## Phase 11: Experiments
+
+1. **Headless matrix only.** E1–E10 scripts under `experiments/` call Phase 4 `sim.runner.run` and
+   never touch the live market API, DB, or chain. Outputs land in `results/phase11/` (gitignored).
+
+2. **SimConfig gains sweep / ablation knobs.** `scenario_overrides` and `bot_param_overrides` shallow-
+   merge onto registered scenarios (e.g. `sybil_count`, `capacity_kw`, `withhold`, `inflate`, `after`).
+   Ablation flags map to engine knobs: `apply_median_cap` → pricing; `apply_lcb` → `z=0`;
+   `apply_forgetting` → huge half-life; `apply_fairness_term` → `beta=0`; `apply_collusion_detector`
+   skips pairwise collusion scoring (anomaly / false-report checks still run).
+
+3. **Smoke vs paper.** Default CLI is `--smoke` via `run_all.py` (1 seed, 20 participants, ≤24
+   intervals, unsigned meters). Paper defaults match GEMINI.md: 30 seeds, 7 days, {50,100,200}
+   participants (`configs/paper.json`). Full paper runs are hours-long.
+
+4. **Figures read CSVs only.** `figures/plot_all.py` and `notebooks/*.ipynb` load
+   `metrics.csv` and never re-invoke the simulator. Manifests store git commit + config for
+   reproducibility. Figure ↔ command map: `docs/RESULTS.md`.
+
+5. **E9 gas is optional.** Scalability metrics always include clearing wall-time (`mean_clear_ms`).
+   On-chain gas-per-interval requires a local Hardhat node and is documented as a follow-up in
+   RESULTS.md rather than blocking the phase.

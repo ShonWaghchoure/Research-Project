@@ -1,0 +1,8 @@
+{
+  "seeds": [7],
+  "days": 1,
+  "max_intervals": 24,
+  "participants": [20],
+  "sign_meters": false,
+  "notes": "Fast local / CI matrix. python run_all.py (default) or python eN.py --smoke."
+}

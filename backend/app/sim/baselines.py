@@ -130,6 +130,8 @@ def clear(
     params: MarketParams,
     prev_p_ref: float | None,
     rng: np.random.Generator,
+    *,
+    apply_median_cap: bool = True,
 ) -> ClearingResult:
     if mode == "B0":
         return clear_b0(positions, feeder, params)
@@ -138,5 +140,7 @@ def clear(
     if mode == "B2":
         return clear_b2(positions, feeder, params, prev_p_ref)
     if mode == "B3":
-        return clear_interval(positions, feeder, params, prev_p_ref)
+        return clear_interval(
+            positions, feeder, params, prev_p_ref, apply_median_cap=apply_median_cap
+        )
     raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")

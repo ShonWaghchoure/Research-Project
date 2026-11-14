@@ -92,3 +92,6 @@ structlog==26.1.0
 limits==5.8.0
 # Phase 7: market lifecycle scheduler
 APScheduler==3.11.3
+# Phase 11: experiment figures (notebooks / plot_all)
+matplotlib==3.10.8
+seaborn==0.13.2
