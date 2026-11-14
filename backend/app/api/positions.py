@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import secrets
 from datetime import timezone
 
-from eth_utils import to_checksum_address
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
@@ -14,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, require_participant
 from app.chain.client import get_chain_client
 from app.chain.commit import compute_commit_hash, side_to_uint8
-from app.core.config import settings
 from app.core.config_store import load_market_params
 from app.db.deps import get_db
 from app.db.models import (
@@ -26,7 +23,7 @@ from app.db.models import (
     User,
 )
 from app.schemas.market import (
-    CommitData,
+    CommitConfirmationIn,
     OrderbookLevel,
     OrderbookOut,
     PositionCreate,
@@ -68,23 +65,28 @@ def _pos_out(p: Position) -> PositionOut:
         side=p.side.value,
         qty_wh=p.qty_wh,
         limit_price_paise=p.limit_price_paise,
+        deadline=int(p.deadline or 0),
+        salt=p.salt or "",
         commit_hash=p.commit_hash,
+        committed_tx=p.committed_tx,
         revealed=p.revealed,
         created_at=p.created_at,
     )
 
 
-@router.post("/positions", response_model=CommitData, status_code=status.HTTP_201_CREATED)
+@router.post("/positions", response_model=PositionOut, status_code=status.HTTP_201_CREATED)
 def create_position(
     body: PositionCreate,
     user: User = Depends(require_participant),
     db: Session = Depends(get_db),
-) -> CommitData:
+) -> PositionOut:
     part = _participant_for(user, db)
     interval = db.query(Interval).order_by(desc(Interval.id)).first()
     if interval is None:
         raise HTTPException(status_code=404, detail="no active interval")
-    if interval.state not in (IntervalState.OPEN, IntervalState.COMMIT):
+    if body.interval_id != interval.id:
+        raise HTTPException(status_code=409, detail="interval is not current")
+    if interval.state != IntervalState.COMMIT:
         raise HTTPException(status_code=409, detail="commits closed for current interval")
 
     existing = (
@@ -116,8 +118,8 @@ def create_position(
         starts = starts.replace(tzinfo=timezone.utc)
     if ends.tzinfo is None:
         ends = ends.replace(tzinfo=timezone.utc)
-    deadline = int(body.deadline) if body.deadline is not None else int(ends.timestamp())
-    # 0 means "no deadline" (the browser hashes it as 0, so it must be kept as 0).
+    # 0 (or omitted) means "no deadline"; the browser hashes it as 0.
+    deadline = int(body.deadline or 0)
     if deadline != 0 and not (
         starts.timestamp() <= deadline <= ends.timestamp() + MAX_DEADLINE_AFTER_END_S
     ):
@@ -125,8 +127,6 @@ def create_position(
             status_code=422,
             detail="deadline must fall between the interval start and 7 days after it ends",
         )
-    salt = bytes.fromhex(body.salt[2:]) if body.salt else secrets.token_bytes(32)
-    salt_hex = "0x" + salt.hex()
     side = PositionSide.buy if body.side == "buy" else PositionSide.sell
     commit = compute_commit_hash(
         interval.id,
@@ -135,7 +135,7 @@ def create_position(
         body.qty_wh,
         body.limit_price_paise,
         deadline,
-        salt,
+        body.salt,
     )
     pos = Position(
         participant_id=part.id,
@@ -144,7 +144,7 @@ def create_position(
         qty_wh=body.qty_wh,
         limit_price_paise=body.limit_price_paise,
         commit_hash=commit,
-        salt=salt_hex,
+        salt=body.salt,
         deadline=deadline,
         revealed=False,
     )
@@ -155,18 +155,39 @@ def create_position(
         db.rollback()
         raise HTTPException(status_code=409, detail="one net position per interval") from exc
     db.refresh(pos)
-    return CommitData(
-        id=pos.id,
-        position_id=pos.id,
-        interval_id=interval.id,
-        commit_hash=commit,
-        salt=salt_hex,
-        side=body.side,
-        qty_wh=body.qty_wh,
-        limit_price_paise=body.limit_price_paise,
-        deadline=deadline,
-        participant=to_checksum_address(user.address),
-    )
+    return _pos_out(pos)
+
+
+@router.post("/positions/{position_id}/commit", response_model=PositionOut)
+def confirm_commit(
+    position_id: int,
+    body: CommitConfirmationIn,
+    user: User = Depends(require_participant),
+    db: Session = Depends(get_db),
+) -> PositionOut:
+    part = _participant_for(user, db)
+    pos = db.get(Position, position_id)
+    if pos is None or pos.participant_id != part.id:
+        raise HTTPException(status_code=404, detail="position not found")
+    if not pos.commit_hash:
+        raise HTTPException(status_code=409, detail="position has no commit hash")
+
+    client = get_chain_client()
+    if not client.is_reachable():
+        raise HTTPException(status_code=503, detail="chain RPC is unavailable")
+    try:
+        onchain = client.on_chain_commit(pos.interval_id, user.address)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="could not verify on-chain commit") from exc
+    if not onchain:
+        raise HTTPException(status_code=409, detail="on-chain commit not found")
+    if onchain.lower() != pos.commit_hash.lower():
+        raise HTTPException(status_code=409, detail="on-chain commit does not match position")
+
+    pos.committed_tx = body.tx_hash
+    db.commit()
+    db.refresh(pos)
+    return _pos_out(pos)
 
 
 @router.post("/positions/{position_id}/reveal", response_model=PositionOut)
@@ -192,16 +213,14 @@ def reveal_position(
         # Revealing earlier would publish the bid while others can still commit.
         raise HTTPException(status_code=409, detail="reveal window is not open")
 
-    if body and body.salt and pos.salt and body.salt.lower() != pos.salt.lower():
-        raise HTTPException(status_code=400, detail="salt mismatch")
-
     if not pos.salt or not pos.commit_hash:
         raise HTTPException(status_code=400, detail="missing commit data")
+    if not body or not pos.committed_tx:
+        raise HTTPException(status_code=409, detail="on-chain commit confirmation is required")
+    if body.tx_hash.lower() != pos.committed_tx.lower():
+        raise HTTPException(status_code=409, detail="commit transaction hash mismatch")
 
-    ends = interval.ends_at
-    if ends.tzinfo is None:
-        ends = ends.replace(tzinfo=timezone.utc)
-    deadline = int(pos.deadline) if pos.deadline is not None else int(ends.timestamp())
+    deadline = int(pos.deadline or 0)
     salt_hex = pos.salt.removeprefix("0x")
     recomputed = compute_commit_hash(
         pos.interval_id,
@@ -215,21 +234,16 @@ def reveal_position(
     if recomputed.lower() != pos.commit_hash.lower():
         raise HTTPException(status_code=400, detail="commit hash mismatch")
 
-    # The sealed bid only means something if it was committed on chain. Fail closed: a
-    # missing commit, a different commit, or an unreachable chain all refuse the reveal.
+    # The sealed bid only means something if it was committed on chain: fail closed.
+    client = get_chain_client()
+    if not client.is_reachable():
+        raise HTTPException(status_code=503, detail="chain RPC is unavailable")
     try:
-        client = get_chain_client()
-        reachable = client.is_reachable()
-        onchain = client.on_chain_commit(pos.interval_id, user.address) if reachable else None
-    except Exception:
-        reachable, onchain = False, None
-    if not reachable:
-        if not settings.testing:
-            raise HTTPException(status_code=503, detail="chain unavailable, try again shortly")
-    elif not onchain:
-        raise HTTPException(status_code=400, detail="no on-chain commit for this position")
-    elif onchain.lower() != pos.commit_hash.lower():
-        raise HTTPException(status_code=400, detail="on-chain commit mismatch")
+        onchain = client.on_chain_commit(pos.interval_id, user.address)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="could not verify on-chain commit") from exc
+    if not onchain or onchain.lower() != pos.commit_hash.lower():
+        raise HTTPException(status_code=409, detail="on-chain commit does not match position")
 
     pos.revealed = True
     db.commit()
@@ -261,16 +275,34 @@ def orderbook(db: Session = Depends(get_db)) -> OrderbookOut:
     if interval is None:
         raise HTTPException(status_code=404, detail="no interval")
     rows = (
-        db.query(Position.side, func.sum(Position.qty_wh), func.count(Position.id))
+        db.query(
+            Position.side,
+            Position.limit_price_paise,
+            func.sum(Position.qty_wh),
+        )
         .filter(
             Position.interval_id == interval.id,
             Position.revealed.is_(True),
         )
-        .group_by(Position.side)
+        .group_by(Position.side, Position.limit_price_paise)
         .all()
     )
-    levels = [
-        OrderbookLevel(side=side.value if hasattr(side, "value") else str(side), total_qty_wh=int(total or 0), count=int(cnt))
-        for side, total, cnt in rows
+    bids = [
+        OrderbookLevel(price_paise=int(price), qty_wh=int(total or 0))
+        for side, price, total in rows
+        if side == PositionSide.buy
     ]
-    return OrderbookOut(interval_id=interval.id, levels=levels)
+    asks = [
+        OrderbookLevel(price_paise=int(price), qty_wh=int(total or 0))
+        for side, price, total in rows
+        if side == PositionSide.sell
+    ]
+    bids.sort(key=lambda level: level.price_paise, reverse=True)
+    asks.sort(key=lambda level: level.price_paise)
+    return OrderbookOut(
+        interval_id=interval.id,
+        supply_wh=sum(level.qty_wh for level in asks),
+        demand_wh=sum(level.qty_wh for level in bids),
+        bids=bids,
+        asks=asks,
+    )

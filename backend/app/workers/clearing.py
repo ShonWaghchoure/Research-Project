@@ -27,8 +27,9 @@ from app.engine.clearing import clear_interval
 from app.engine.pricing import Position as EngPosition
 from app.reputation.score import BetaState, initial_state, reputation
 from app.reputation.tiers import Tier, classify, matching_reputation, volume_cap_kwh
+from app.workers.fairness_persist import persist_fairness
 from app.workers.feeder_load import load_feeder
-from app.workers.pubsub import publish_price, publish_trades
+from app.workers.pubsub import publish_grid, publish_price, publish_trades
 
 logger = structlog.get_logger(__name__)
 
@@ -142,10 +143,21 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
         )
 
     eng_positions: list[EngPosition] = []
+    baseline_positions: list[EngPosition] = []
     for pos in positions:
         part = db.get(Participant, pos.participant_id)
         if part is None or not part.active:
             continue
+        baseline_positions.append(
+            EngPosition(
+                participant_id=str(pos.participant_id),
+                side="buy" if pos.side == PositionSide.buy else "sell",
+                qty_kwh=pos.qty_wh / 1000.0,
+                limit_price=float(pos.limit_price_paise),
+                reputation=1.0,
+                node_id=part.feeder_node_id,
+            )
+        )
         state, prev_tier = _latest_rep(db, pos.participant_id)
         tier = classify(state, prev_tier=prev_tier)
         r_match = matching_reputation(state, tier)
@@ -163,7 +175,7 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
         qty_kwh = qty_wh / 1000.0
         # Apply volume cap for probation etc.
         r_true = reputation(state)
-        cap = volume_cap_kwh(qty_kwh, r_true)
+        cap = volume_cap_kwh(params.q_base_kwh, r_true)
         qty_kwh = min(qty_kwh, cap)
         eng_positions.append(
             EngPosition(
@@ -211,6 +223,17 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
     interval.input_root = result.input_root
     interval.result_hash = result.result_hash
     interval.engine_version = engine_version()
+
+    persist_fairness(
+        db,
+        interval_id=interval.id,
+        positions_b3=eng_positions,
+        positions_b2=baseline_positions,
+        result_b3=result,
+        feeder=feeder,
+        params=params,
+        prev_p_ref=prev_p,
+    )
 
     # Reveal-miss events for unrevealed commits
     unrevealed = (
@@ -270,6 +293,7 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
             ],
         }
     )
+    publish_grid({"interval_id": interval.id})
     logger.info(
         "clearing_done",
         interval_id=interval.id,

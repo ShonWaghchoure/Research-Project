@@ -40,6 +40,25 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if creds is None or not creds.credentials:
+        return None
+    try:
+        payload = decode_access_token(creds.credentials)
+    except PyJWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token"
+        ) from exc
+    user_id = payload.get("uid")
+    user = db.get(User, user_id) if user_id is not None else None
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
+    return user
+
+
 def require_roles(*roles: UserRole) -> Callable[..., User]:
     allowed = set(roles)
 

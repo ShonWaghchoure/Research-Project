@@ -73,6 +73,7 @@ _RANGES: dict[str, tuple[float, float, bool, bool]] = {
     "half_life_intervals": (1, 1_000_000, True, True),
     "shortfall_penalty_f": (0, 1, True, True),
     "collusion_window_intervals": (1, 100_000, True, True),
+    "q_base_kwh": (0, 1_000, False, True),
 }
 
 

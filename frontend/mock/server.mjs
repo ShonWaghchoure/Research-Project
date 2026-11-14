@@ -825,6 +825,21 @@ async function route(req, res) {
     positions.push(pos);
     return json(res, 201, posOut(pos));
   }
+  // Same protocol as the backend: the client reports its commit tx, the server checks it on chain.
+  const cm = p.match(/^\/positions\/(\d+)\/commit$/);
+  if (cm && m === "POST") {
+    const u = auth(req);
+    const pos = positions.find((x) => x.id === Number(cm[1]) && x.address === u.address);
+    if (!pos) throw new HttpError(404, "position not found");
+    const b = await readBody(req);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(b.tx_hash ?? "")) throw new HttpError(422, "tx_hash: 32 bytes hex");
+    if (!chainOk) throw new HttpError(503, "chain RPC is unavailable");
+    const onchain = await onChainCommit(pos.interval_id, u.address);
+    if (!onchain) throw new HttpError(409, "on-chain commit not found");
+    if (onchain.toLowerCase() !== pos.commit_hash.toLowerCase()) throw new HttpError(409, "on-chain commit does not match position");
+    pos.committed_tx = b.tx_hash;
+    return json(res, 200, posOut(pos));
+  }
   const rv = p.match(/^\/positions\/(\d+)\/reveal$/);
   if (rv && m === "POST") {
     const u = auth(req);
@@ -833,11 +848,12 @@ async function route(req, res) {
     const iv = intervals.find((i) => i.id === pos.interval_id);
     if (!iv || iv.state !== "REVEAL") throw new HttpError(409, "reveal window is not open");
     const b = await readBody(req);
+    if (!pos.committed_tx) throw new HttpError(409, "on-chain commit confirmation is required");
+    if ((b.tx_hash ?? "").toLowerCase() !== pos.committed_tx.toLowerCase()) throw new HttpError(409, "commit transaction hash mismatch");
+    if (!chainOk) throw new HttpError(503, "chain RPC is unavailable");
     const onchain = await onChainCommit(pos.interval_id, u.address);
-    if (onchain === null && chainOk) throw new HttpError(409, "no on-chain commit found");
-    if (onchain && onchain.toLowerCase() !== pos.commit_hash.toLowerCase()) throw new HttpError(409, "reveal does not match the on-chain commit");
+    if (!onchain || onchain.toLowerCase() !== pos.commit_hash.toLowerCase()) throw new HttpError(409, "on-chain commit does not match position");
     pos.revealed = true;
-    pos.committed_tx = b.tx_hash ?? pos.committed_tx ?? "0x";
     return json(res, 200, posOut(pos));
   }
   if (p === "/positions/mine") {

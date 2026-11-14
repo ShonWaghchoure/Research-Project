@@ -100,6 +100,7 @@ implemented exactly; the items below are the gaps and how they were filled.
      `tiers.matching_reputation()` returns max(R, rho_min) for Probation and 0 for Suspended.
    - **Hand-off (Phases 4 and 7)**: when building `engine.pricing.Position`, set
      `reputation = matching_reputation(state, tier)` and cap `qty_kwh` at `volume_cap_kwh(...)`.
+     The shared `MarketParams.q_base_kwh` defaults to 2 kWh per interval and is configurable.
      The Phase 2 engine is unchanged. Note that the SDR weight then gives Probation volume
      w = 0.3/0.8 = 0.375, so it is still discounted in pricing.
    - Result: perfect behaviour reaches Standard after 20 intervals and Trusted after 100
@@ -300,7 +301,7 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 
 ## Phase 8: Frontend Foundation
 
-1. **Phase 7 is not built yet (teammate in progress), so the frontend runs against a mock.**
+1. **The backend is the production API; the mock remains a frontend-only demo fallback.**
    - `frontend/mock/server.mjs` implements the Phase 7 API from GEMINI.md: `/intervals/current`, `/intervals/{id}`,
      `/price-history`, `/orderbook`, `/positions`, `/positions/{id}/reveal`, `/positions/mine`, `/trades`,
      `/trades/{id}`, `/reputation/{address}`, plus `/grid/status` and the `/ws` channels
@@ -308,11 +309,12 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
    - It acts as the operator on the local Hardhat chain: it calls `Settlement.openInterval` for every interval and
      checks each reveal against the on-chain commit. Wallet transactions (faucet, stake, register, deposit, commit)
      are real.
-   - Assumed response shapes live in `frontend/src/lib/api/types.ts` (marked "Phase 7"). When the real backend lands:
-     run `make gen-api`, reconcile that file, and point `NEXT_PUBLIC_API_URL` at the backend.
-   - Assumed extras the real Phase 7 should provide or the UI should drop: `Interval.commit_deadline`,
-     `reveal_deadline`, `prev_p_ref_paise`, `active_participants`; `Reputation.components`, `intervals_to_trusted`,
-     `volume_cap_kwh`; `GET /grid/status`; `Trade.status`; `POST /positions/{id}/reveal` body `{tx_hash}`.
+   - The FastAPI backend exposes the same response shapes, including interval deadlines, anonymized order-book
+     levels, trade status and participant addresses, reputation components/proofs, grid status, and B2/B3
+     fairness history. `NEXT_PUBLIC_API_URL` defaults to the backend at `http://localhost:8000`.
+   - Position creation accepts the browser-generated salt so both sides hash the same preimage. After the wallet
+     commits, `/positions/{id}/commit` verifies the on-chain hash and stores its transaction hash; reveal requires
+     that transaction hash and rechecks the on-chain commitment.
 
 2. **Interval must be open on chain before the API reports COMMIT.** Found by the end-to-end test: the operator's
    `openInterval` transaction landed about 7 s after the interval started, so the on-chain commit window was 13 s while
@@ -355,8 +357,9 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 
 10. **Phase 9 pages.** Market, Grid, Reputation and Fairness use the Phase 8 design system and live mock data
     (price/orderbook/trades/grid/reputation/fairness). The feeder map is a fixed-layout SVG (not React Flow/D3)
-    so it stays light and keyboard-accessible. Fairness B2 vs B3 series are simulated in the mock until the
-    experiment store exists. ProofVerifier calls `GET /reputation/{addr}/proof` then `ReputationAnchor.verifyScore`.
+    so it stays light and keyboard-accessible. The backend persists the computed B2/B3 fairness metrics per
+    interval; the mock has its own generated comparison series. ProofVerifier calls
+    `GET /reputation/{addr}/proof` then `ReputationAnchor.verifyScore`.
 
 11. **`/status`.** Shon's Phase 6 health and login demo page is kept as a plain System status page
     (backend health, session, contract addresses) instead of being deleted.
@@ -530,3 +533,18 @@ against the code before fixing; each fix has a regression test. Severity is for 
   detection is by off-chain re-run against the published inputs (Known limitations).
 - Meter readings are simulated and signed server-side; there is no external meter key yet.
 - The MockINR faucet makes the stake cheap for Sybils on a public testnet (test token by design).
+
+### Merge with "bugs fixed" (main, 2c9a96a)
+
+Shon's commit landed in parallel and overlapped the audit; both are kept:
+- Positions: his commit-confirmation protocol (`/positions/{id}/commit`, required browser salt,
+  `interval_id`, reveal echoes the confirmed tx, strict fail-closed on-chain checks) plus the
+  audit's capacity caps, live-config tariff check, deadline validation and row lock. A missing
+  deadline means 0 (none).
+- Migrations re-chained to one head: `b8d2 → c9e3 (commit_tx) → c1e9 (SIWE issued_at) → d4f2
+  (clearing_inputs)`.
+- WebSocket: his JSON parsing / `type: "update"` moved into the shared hub (parsed once).
+- Config validator covers his new `q_base_kwh` (fixed volume-cap base, which also resolves the
+  "cap relative to the bid" finding).
+- The mock gained the same `/positions/{id}/commit` endpoint; the trade page recovers and
+  confirms the commit tx from the `PositionCommitted` event if a refresh interrupted it.

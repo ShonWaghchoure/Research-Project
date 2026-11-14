@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { WS_URL } from "./api/client";
-import type { Interval, Trade, WsMessage } from "./api/types";
+import type { Interval, WsMessage } from "./api/types";
 import { queryKeys } from "./queries";
 
 export type WsStatus = "connecting" | "open" | "closed";
@@ -74,8 +74,14 @@ type QC = ReturnType<typeof useQueryClient>;
 export function applyMessage(qc: QC, msg: WsMessage) {
   switch (msg.channel) {
     case "interval": {
-      const data = msg.data as Interval;
-      qc.setQueryData<Interval>(queryKeys.interval, data);
+      const data = msg.data as Partial<Interval> & { interval_id?: number };
+      const id = data.id ?? data.interval_id;
+      if (id !== undefined) {
+        qc.setQueryData<Interval>(queryKeys.interval, (old) =>
+          old?.id === id ? { ...old, ...data, id } : old,
+        );
+      }
+      qc.invalidateQueries({ queryKey: queryKeys.interval });
       if (data.state === "CLEARING" || data.state === "SETTLED") {
         qc.invalidateQueries({ queryKey: queryKeys.priceHistory });
         qc.invalidateQueries({ queryKey: queryKeys.orderbook });
@@ -101,10 +107,7 @@ export function applyMessage(qc: QC, msg: WsMessage) {
       break;
     }
     case "trades": {
-      const trade = msg.data as Trade;
-      qc.setQueryData<Trade[]>(queryKeys.trades(), (old) =>
-        old ? [trade, ...old.filter((t) => t.id !== trade.id)].slice(0, 100) : old,
-      );
+      qc.invalidateQueries({ queryKey: queryKeys.trades() });
       qc.invalidateQueries({ queryKey: queryKeys.trades(true) });
       break;
     }

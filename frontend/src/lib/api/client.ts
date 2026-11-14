@@ -128,7 +128,7 @@ export const api = {
       }),
   },
 
-  // Phase 7 (served by the mock until the teammate's backend lands)
+  // Market lifecycle
   intervals: {
     current: () => request<Interval>("/intervals/current", { auth: false }),
     get: (id: number) => request<Interval>(`/intervals/${id}`, { auth: false }),
@@ -139,6 +139,11 @@ export const api = {
   positions: {
     create: (body: PositionCreate) =>
       request<Position>("/positions", { method: "POST", body: JSON.stringify(body) }),
+    commit: (id: number, txHash: string) =>
+      request<Position>(`/positions/${id}/commit`, {
+        method: "POST",
+        body: JSON.stringify({ tx_hash: txHash }),
+      }),
     reveal: (id: number, txHash: string) =>
       request<Position>(`/positions/${id}/reveal`, {
         method: "POST",

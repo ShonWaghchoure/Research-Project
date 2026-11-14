@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useAccount } from "wagmi";
+import { useAccount, usePublicClient } from "wagmi";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardBody, CardFooter, CardHeader, Stat } from "@/components/ui/card";
@@ -198,13 +198,39 @@ function PositionCard({ interval }: { interval: ReturnType<typeof useCurrentInte
   // Resume a half-finished flow after a refresh or navigation. Whether the position was
   // committed is read from the contract, not from local state (which a refresh loses).
   const onChain = useOnChainCommit(existing?.interval_id);
+  const publicClient = usePublicClient();
   useEffect(() => {
     if (phase !== "form" || !existing || existing.revealed || onChain.isPending) return;
     const committed =
       !!onChain.commitHash && onChain.commitHash.toLowerCase() === existing.commit_hash.toLowerCase();
-    setPosition({ ...existing, committed_tx: committed ? existing.committed_tx ?? "on-chain" : null });
-    setPhase(committed ? "await-reveal" : "commit");
-  }, [existing, phase, onChain.isPending, onChain.commitHash]);
+    setPosition(existing);
+    if (!committed) {
+      setPhase("commit");
+      return;
+    }
+    setPhase("await-reveal");
+    if (existing.committed_tx || !publicClient || !address) return;
+    // Committed on chain, but the confirmation never reached the server (e.g. the page was
+    // refreshed in between). The reveal needs it, so recover the tx from the event and confirm.
+    publicClient
+      .getContractEvents({
+        ...contracts.Settlement,
+        eventName: "PositionCommitted",
+        args: { id: BigInt(existing.interval_id), participant: address },
+        fromBlock: 0n,
+      })
+      .then((logs) => {
+        const hash = logs.at(-1)?.transactionHash;
+        return hash ? api.positions.commit(existing.id, hash) : null;
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          setPosition(confirmed);
+          qc.invalidateQueries({ queryKey: queryKeys.positionsMine });
+        }
+      })
+      .catch((e: Error) => setFailure(e.message));
+  }, [existing, phase, onChain.isPending, onChain.commitHash, publicClient, address, qc]);
 
   // Auto-reveal once the reveal window opens.
   useEffect(() => {
@@ -243,10 +269,10 @@ function PositionCard({ interval }: { interval: ReturnType<typeof useCurrentInte
   const commit = useMutation({
     mutationFn: async (p: Position) => {
       const hash = await tx.run({ ...contracts.Settlement, functionName: "commitPosition", args: [BigInt(p.interval_id), p.commit_hash] });
-      return hash;
+      return api.positions.commit(p.id, hash);
     },
-    onSuccess: (_hash, p) => {
-      setPosition({ ...p, committed_tx: _hash });
+    onSuccess: (committed, p) => {
+      setPosition(committed);
       qc.invalidateQueries({ queryKey: queryKeys.positionsMine });
       setPhase("await-reveal");
     },

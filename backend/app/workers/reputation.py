@@ -24,6 +24,7 @@ from app.reputation.score import (
     BetaState,
     Evidence,
     delivery_ratio,
+    evidence_weight,
     initial_state,
     reputation,
     reveal_miss_evidence,
@@ -156,6 +157,23 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> b
             )
         else:
             ev = None  # idle decay
+
+        if ev is not None:
+            db.add(
+                ReputationEvent(
+                    interval_id=interval.id,
+                    participant_id=part.id,
+                    event_type="score_evidence",
+                    payload={
+                        "delivery": ev.r_del,
+                        "reveal": ev.r_rev,
+                        "honesty": 1.0 - ev.anomaly,
+                        "collusion_free": 1.0 - ev.collusion,
+                        "volume_kwh": ev.volume_kwh,
+                        "weight": evidence_weight(ev),
+                    },
+                )
+            )
 
         new_state = update(state, ev)
         tier = classify(new_state, prev_tier=prev_tier)

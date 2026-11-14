@@ -43,6 +43,7 @@ def _rep_before(db: Session, participant_id: int, before_interval_id: int) -> tu
 
 def build_engine_positions(db: Session, interval: Interval) -> list[EngPosition]:
     """Rebuild the engine positions that clearing would have used (reputation as-of then)."""
+    params = load_market_params(db)
     positions = (
         db.query(Position)
         .filter(Position.interval_id == interval.id, Position.revealed.is_(True))
@@ -58,7 +59,7 @@ def build_engine_positions(db: Session, interval: Interval) -> list[EngPosition]
         r_match = matching_reputation(state, tier)
         qty_kwh = pos.qty_wh / 1000.0
         r_true = reputation(state)
-        cap = volume_cap_kwh(qty_kwh, r_true)
+        cap = volume_cap_kwh(params.q_base_kwh, r_true)
         qty_kwh = min(qty_kwh, cap)
         eng.append(
             EngPosition(

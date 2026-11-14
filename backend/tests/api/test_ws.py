@@ -16,7 +16,7 @@ def test_rejects_foreign_origin_when_origins_configured(client: TestClient, monk
         with client.websocket_connect("/ws", headers={"origin": "https://evil.example"}) as s:
             s.receive_json()
     with client.websocket_connect("/ws", headers={"origin": "https://p2p.example.org"}) as s:
-        assert s.receive_json() == {"subscribed": ["interval", "price", "trades"]}
+        assert s.receive_json()["subscribed"]
 
 
 def test_per_ip_cap(client: TestClient, monkeypatch):

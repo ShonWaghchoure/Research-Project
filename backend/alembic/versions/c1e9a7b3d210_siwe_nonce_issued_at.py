@@ -1,7 +1,7 @@
 """siwe nonce issued_at (security fix: bind sign-in to the exact issued message)
 
 Revision ID: c1e9a7b3d210
-Revises: b8d2e3f4a506
+Revises: c9e3f5a7b601
 Create Date: 2026-11-14 18:00:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c1e9a7b3d210"
-down_revision: Union[str, None] = "b8d2e3f4a506"
+down_revision: Union[str, None] = "c9e3f5a7b601"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

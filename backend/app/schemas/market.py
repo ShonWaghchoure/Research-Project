@@ -13,27 +13,40 @@ class IntervalOut(BaseModel):
     state: str
     starts_at: datetime
     ends_at: datetime
+    commit_deadline: datetime
+    reveal_deadline: datetime
     p_ref_paise: Optional[int] = None
+    prev_p_ref_paise: Optional[int] = None
     sdr: Optional[float] = None
+    active_participants: int
     input_root: Optional[str] = None
     result_hash: Optional[str] = None
     delivery_root: Optional[str] = None
     engine_version: Optional[str] = None
 
 
+class PricePointOut(BaseModel):
+    interval_id: int
+    ends_at: datetime
+    p_ref_paise: int
+    sdr: float
+
+
 #: Hard ceiling (1 MWh, ₹1000/kWh): keeps every value inside the int32 DB columns.
+#: The tariff band itself is enforced in the route from the live config (p_fit..p_ret).
 MAX_POSITION_WH = 1_000_000
 MAX_PRICE_PAISE = 100_000
 
 
 class PositionCreate(BaseModel):
+    interval_id: int = Field(..., gt=0)
     side: Literal["buy", "sell"]
     qty_wh: int = Field(..., gt=0, le=MAX_POSITION_WH)
     limit_price_paise: int = Field(..., gt=0, le=MAX_PRICE_PAISE)
-    deadline: Optional[int] = Field(None, ge=0, le=2**31 - 1)  # unix s; default interval end
+    deadline: Optional[int] = Field(None, ge=0, le=2**31 - 1)  # unix s; 0 = none
     # The browser generates the salt (docs/DECISIONS.md, Phase 8 #4) so it can check the
-    # commit hash itself. When omitted, the server generates one.
-    salt: Optional[str] = Field(None, pattern=r"^0x[0-9a-fA-F]{64}$")
+    # commit hash itself before committing on chain.
+    salt: str = Field(..., pattern=r"^0x[0-9a-fA-F]{64}$")
 
 
 class CommitData(BaseModel):
@@ -56,52 +69,79 @@ class PositionOut(BaseModel):
     side: str
     qty_wh: int
     limit_price_paise: int
+    deadline: int
+    salt: str
     commit_hash: Optional[str] = None
+    committed_tx: Optional[str] = None
     revealed: bool
     created_at: datetime
 
 
 class RevealIn(BaseModel):
-    """Optional salt confirmation; server already stores salt privately."""
+    """Commit transaction hash submitted when the owner reveals."""
 
-    salt: Optional[str] = None
+    tx_hash: str = Field(..., pattern=r"^0x[0-9a-fA-F]{64}$")
+
+
+class CommitConfirmationIn(BaseModel):
+    tx_hash: str = Field(..., pattern=r"^0x[0-9a-fA-F]{64}$")
 
 
 class TradeOut(BaseModel):
     id: int
     interval_id: int
-    buyer_id: int
-    seller_id: int
+    side: Optional[Literal["buy", "sell"]] = None
+    buyer: str
+    seller: str
     qty_wh: int
     price_paise: int
+    status: Literal["cleared", "settled", "delivered", "shortfall"]
     created_at: datetime
 
 
 class OrderbookLevel(BaseModel):
-    side: str
-    total_qty_wh: int
-    count: int
+    price_paise: int
+    qty_wh: int
 
 
 class OrderbookOut(BaseModel):
     interval_id: int
-    levels: list[OrderbookLevel]
+    supply_wh: int
+    demand_wh: int
+    bids: list[OrderbookLevel]
+    asks: list[OrderbookLevel]
 
 
-class ReputationOut(BaseModel):
-    address: str
-    interval_id: Optional[int] = None
+class ReputationComponents(BaseModel):
+    delivery: float
+    reveal: float
+    honesty: float
+    collusion: float
+
+
+class ReputationHistoryPointOut(BaseModel):
+    interval_id: int
+    ends_at: datetime
+    score: float
     score_bp: int
+    tier: str
     evidence_count: int
+    components: ReputationComponents
+
+
+class ReputationOut(ReputationHistoryPointOut):
+    address: str
     alpha: float
     beta: float
-    tier: str
+    intervals_to_trusted: Optional[int] = None
+    volume_cap_kwh: float
+    updated_at: datetime
     leaf_hash: Optional[str] = None
 
 
 class ReputationHistoryOut(BaseModel):
     address: str
-    history: list[ReputationOut]
+    history: list[ReputationHistoryPointOut]
 
 
 class ReputationProofOut(BaseModel):
@@ -112,3 +152,49 @@ class ReputationProofOut(BaseModel):
     leaf_hash: str
     proof: list[str]
     root: str
+
+
+class GridLineOut(BaseModel):
+    id: str
+    from_node: str
+    to_node: str
+    capacity_kw: float
+    loading_pct: float
+
+
+class GridParticipantOut(BaseModel):
+    address: str
+    kind: str
+
+
+class GridNodeOut(BaseModel):
+    id: str
+    label: str
+    kind: str
+    participants: list[GridParticipantOut]
+
+
+class GridStatusOut(BaseModel):
+    interval_id: int
+    lines: list[GridLineOut]
+    congested_line_ids: list[str]
+    max_loading_pct: float
+    p2p_share_pct: float
+    nodes: list[GridNodeOut]
+
+
+class FairnessMetricOut(BaseModel):
+    interval_id: int
+    ends_at: datetime
+    baseline: Literal["B2", "B3"]
+    jain: float
+    gini: float
+    hhi: float
+    small_actor_parity: float
+    price_impact: float
+    welfare_efficiency: float
+
+
+class FairnessHistoryOut(BaseModel):
+    baseline: Literal["B2", "B3"]
+    metrics: list[FairnessMetricOut]

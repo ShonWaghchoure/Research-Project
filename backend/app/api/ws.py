@@ -9,6 +9,7 @@ break the workers that publish market updates.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import Counter
 from typing import Any
 
@@ -49,7 +50,14 @@ class _Hub:
                 async for msg in pubsub.listen():
                     if msg.get("type") != "message":
                         continue
-                    payload = {"channel": msg["channel"], "data": msg["data"]}
+                    # Publishers send JSON strings; clients expect objects. Parse once here
+                    # for every client instead of once per connection.
+                    try:
+                        data: Any = json.loads(msg["data"])
+                    except (TypeError, json.JSONDecodeError):
+                        logger.warning("ws_invalid_pubsub_payload", channel=msg.get("channel"))
+                        continue
+                    payload = {"channel": msg["channel"], "type": "update", "data": data}
                     for q, subs in list(self.clients.items()):
                         if msg["channel"] not in subs:
                             continue
@@ -83,7 +91,7 @@ def _origin_allowed(origin: str | None) -> bool:
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    channels: str = Query("interval,price,trades"),
+    channels: str = Query("interval,price,trades,reputation,flags,grid"),
 ) -> None:
     ip = websocket.client.host if websocket.client else "unknown"
     if not _origin_allowed(websocket.headers.get("origin")):

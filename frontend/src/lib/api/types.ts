@@ -1,10 +1,9 @@
 /**
  * API types.
  *
- * Phase 6 types come from the generated OpenAPI schema (src/api/schema.d.ts).
- * Phase 7 (market lifecycle) is being built by a teammate; the types below follow the
- * Phase 7 section of GEMINI.md and are served by mock/server.mjs until the real backend
- * lands. When it does, regenerate the schema (`make gen-api`) and reconcile this file.
+ * Auth and participant types come from the generated OpenAPI schema
+ * (src/api/schema.d.ts). Market types match the FastAPI response contracts and the
+ * frontend mock.
  */
 import type { components } from "@/api/schema";
 
