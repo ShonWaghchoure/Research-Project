@@ -14,7 +14,17 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from web3 import Web3
 
-from app.api import admin, audit, auth, intervals, participants, positions, reputation_api, trades, ws
+from app.api import (
+    admin,
+    audit,
+    auth,
+    intervals,
+    participants,
+    positions,
+    reputation_api,
+    trades,
+    ws,
+)
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import setup_logging
@@ -45,9 +55,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         stop_scheduler()
 
 
+def _cors_origins() -> list[str]:
+    raw = (settings.CORS_ORIGINS or "*").strip()
+    if raw in ("*", ""):
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app = FastAPI(
     title="Fair and Trustworthy P2P Energy Trading API",
-    version="0.10.0",
+    version="0.12.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -55,12 +72,17 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
+_cors = _cors_origins()
+# Browsers reject allow_origins=["*"] with credentials=True; only enable credentials
+# when origins are an explicit allow-list (production).
+_cors_credentials = _cors != ["*"]
+
 app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

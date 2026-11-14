@@ -160,11 +160,28 @@ class ChainClient:
             )
             if existing is not None:
                 if existing.status == TxStatus.confirmed:
-                    return existing
-                if existing.status == TxStatus.submitted and existing.tx_hash:
-                    self._await_and_finalize(session, existing)
-                    return existing
-                if existing.status == TxStatus.failed:
+                    # Hardhat restarts wipe chain state while DB rows remain; only
+                    # skip re-send when the receipt still exists on the live RPC.
+                    if existing.tx_hash and self._tx_still_on_chain(existing.tx_hash):
+                        return existing
+                    logger.warning(
+                        "idempotent_tx_missing_on_chain",
+                        key=idempotency_key,
+                        tx=existing.tx_hash,
+                    )
+                    existing.status = TxStatus.pending
+                    existing.error = "receipt missing after chain reset"
+                    existing.tx_hash = None
+                    session.commit()
+                elif existing.status == TxStatus.submitted and existing.tx_hash:
+                    if self._tx_still_on_chain(existing.tx_hash):
+                        self._await_and_finalize(session, existing)
+                        return existing
+                    existing.status = TxStatus.pending
+                    existing.error = "submitted tx missing after chain reset"
+                    existing.tx_hash = None
+                    session.commit()
+                elif existing.status == TxStatus.failed:
                     # Allow retry with same key by resetting to pending.
                     existing.status = TxStatus.pending
                     existing.error = None
@@ -233,6 +250,14 @@ class ChainClient:
             raise
         # hexbytes 2.x returns bare hex; always store canonical 0x form.
         return _norm_hex(HexBytes(tx_hash).hex())
+
+    def _tx_still_on_chain(self, tx_hash: str) -> bool:
+        """Return True if ``tx_hash`` has a receipt on the current RPC."""
+        try:
+            receipt = self.w3.eth.get_transaction_receipt(_norm_hex(tx_hash))
+            return receipt is not None and int(receipt.get("status", 0)) == 1
+        except Exception:
+            return False
 
     def _await_and_finalize(self, session: Session, row: Transaction) -> None:
         if not row.tx_hash:

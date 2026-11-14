@@ -9,6 +9,7 @@
     "test:gas": "REPORT_GAS=true hardhat test",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:hardhat": "hardhat run scripts/deploy.ts --network hardhat",
+    "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
     "lint": "prettier --check 'contracts/**/*.sol' 2>/dev/null || true"
   },
   "devDependencies": {

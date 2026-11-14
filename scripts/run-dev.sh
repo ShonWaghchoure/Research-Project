@@ -18,7 +18,7 @@ trap cleanup SIGINT SIGTERM EXIT
 # Demo defaults (overridable by caller / .env)
 export DEMO_MODE="${DEMO_MODE:-1}"
 export INTERVAL_SECONDS="${INTERVAL_SECONDS:-45}"
-export DEMO_BOT_COUNT="${DEMO_BOT_COUNT:-10}"
+export DEMO_BOT_COUNT="${DEMO_BOT_COUNT:-20}"
 
 # Start backend
 (cd "$ROOT_DIR/backend" && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000) &

@@ -60,6 +60,7 @@ Thumbs.db
 # Results & temp
 results/
 .wheels/
+.demo/
 
 # Frontend tests
 frontend/test-results/

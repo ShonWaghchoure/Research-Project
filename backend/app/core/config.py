@@ -47,7 +47,7 @@ def _load_deployment_addresses(chain_id: int) -> dict[str, str]:
 
 class Settings(BaseSettings):
     DATABASE_URL: str = (
-        "postgresql+psycopg://postgres:postgrespassword@localhost:5432/energy_trading"
+        "postgresql+psycopg://postgres:postgrespassword@localhost:5433/energy_trading"
     )
     REDIS_URL: str = "redis://localhost:6379/0"
     CHAIN_RPC_URL: str = "http://127.0.0.1:8545"
@@ -59,9 +59,11 @@ class Settings(BaseSettings):
     INTERVAL_SECONDS: int = 900
 
     DEMO_MODE: bool = False
-    DEMO_BOT_COUNT: int = 10
+    DEMO_BOT_COUNT: int = 20
     # Optional override; when unset, derived from CHAIN_ID (1 local, 2 sepolia).
     CHAIN_CONFIRMATIONS: Optional[int] = None
+    # Comma-separated browser origins. Empty / "*" = allow all (local demo only).
+    CORS_ORIGINS: str = "*"
 
     PING_CONTRACT_ADDRESS: Optional[str] = None
     MOCK_INR_ADDRESS: Optional[str] = None

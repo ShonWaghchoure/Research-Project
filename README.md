@@ -24,20 +24,22 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **9** | Frontend market views | ✅ **Done** |
 | **10** | Attack lab, audit, admin | ✅ **Done** |
 | **11** | Experiments | ✅ **Done** |
-| 12 | Hardening, deploy, docs | ⬜ Pending |
+| **12** | Hardening, deploy, docs | ✅ **Done** |
 
 ---
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/<your-username>/fair-and-trustworthy.git
-cd fair-and-trustworthy
-cp .env.example .env   # fill in your secrets
-make dev               # starts everything — docker, hardhat node, backend, frontend
+git clone https://github.com/<your-username>/Fair_And_Trustworthy.git
+cd Fair_And_Trustworthy
+cp .env.example .env
+make demo              # one-click: Docker + Hardhat + deploy + seed + API + UI
 ```
 
-Then open [http://localhost:3000](http://localhost:3000).
+Then open [http://localhost:3000](http://localhost:3000). Use **Demo wallet #1–#3** in the connect menu (Hardhat unlocked). Walkthrough: [`docs/DEMO.md`](docs/DEMO.md).
+
+`make dev` is the same stack without the browser open helper.
 
 ---
 
@@ -65,15 +67,20 @@ fair-and-trustworthy/
 │   └── src/app/              # Pages: dashboard, trade, market, grid, reputation,
 │                             #        fairness, attack, audit, admin, status
 ├── experiments/              # Phase 11: E1–E10 runners, figures, notebooks
+├── scripts/                  # demo.sh · run-dev.sh · security-pass.sh
 ├── docker-compose.yml        # postgres:16-alpine (port 5433) + redis:7-alpine
-├── Makefile                  # dev · test · lint · reset-db
+├── Makefile                  # demo · dev · test · lint · security · …
 ├── .env.example              # all required variables
-├── .github/workflows/ci.yml  # contracts + backend + frontend on every PR
+├── .github/workflows/ci.yml  # secrets + contracts + backend + frontend
 └── docs/
+    ├── ARCHITECTURE.md       # layers + interval lifecycle
+    ├── MATH.md               # formulas and parameters
+    ├── CONTRACTS.md          # on-chain surface (NatSpec summary)
+    ├── DEPLOY.md             # local / Docker / Vercel / Sepolia
+    ├── DEMO.md               # 10-minute demo script
     ├── DECISIONS.md          # design decision log
-    ├── ARCHITECTURE.md       # (Phase 12)
-    ├── MATH.md               # (Phase 12)
-    └── RESULTS.md            # Phase 11 figure ↔ command map
+    ├── RESULTS.md            # Phase 11 figure ↔ command map
+    └── screenshots/          # page captures (see README there)
 ```
 
 ---
@@ -81,14 +88,33 @@ fair-and-trustworthy/
 ## Make Targets
 
 ```bash
-make dev                # docker up → hardhat node → deploy contracts → backend → frontend
+make demo               # one-click demo (reset-ready stack + open browser)
+make dev                # docker up → hardhat → deploy → seed → backend → frontend
 make test               # contracts (hardhat) + backend (pytest) + frontend (next build)
 make lint               # ruff + mypy + next lint
 make reset-db           # wipe volumes, re-migrate, seed demo participants
 make gen-api            # OpenAPI → frontend/src/api/schema.d.ts
 make experiments-smoke  # Phase 11 E1–E10 smoke matrix → results/phase11/
 make experiments-plot   # regenerate figures from saved metrics.csv
+make security           # npm audit + pip-audit + optional Slither + FE key scan
+make sync-contracts     # copy deployments/localhost.json → frontend
 ```
+
+---
+
+## Screenshots
+
+Captured from a live `make demo` session (full set under [`docs/screenshots/`](docs/screenshots/)):
+
+| Landing | Dashboard | Market |
+|:-------:|:---------:|:------:|
+| ![landing](docs/screenshots/landing.png) | ![dashboard](docs/screenshots/dashboard.png) | ![market](docs/screenshots/market.png) |
+
+| Trade | Grid | Status |
+|:-----:|:----:|:------:|
+| ![trade](docs/screenshots/trade.png) | ![grid](docs/screenshots/grid.png) | ![status](docs/screenshots/status.png) |
+
+Also: reputation · fairness · attack · audit · admin — see the folder README. Architecture diagram (text): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
@@ -556,10 +582,37 @@ See [`.env.example`](.env.example) for all required variables:
 | `JWT_SECRET` | Secret for signing JWTs |
 | `INTERVAL_SECONDS` | Market interval length in seconds (demo default 45) |
 | `DEMO_MODE` | Enable demo bots + automatic interval workers (`1`/`0`) |
-| `DEMO_BOT_COUNT` | Number of Hardhat demo bot wallets (default 10) |
+| `DEMO_BOT_COUNT` | Number of Hardhat demo bot wallets (default 20) |
+| `CORS_ORIGINS` | Comma-separated browser origins (`*` local only) |
 | `CHAIN_CONFIRMATIONS` | Receipt confirmations before marking txs confirmed |
 | `PING_CONTRACT_ADDRESS` | Deployed Ping contract address |
 | `MOCK_INR_ADDRESS` / `REGISTRY_ADDRESS` / `SETTLEMENT_ADDRESS` / `REPUTATION_ANCHOR_ADDRESS` | Deployed market contracts |
+
+Full hosting notes: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+---
+
+## Phase 12 Smoke Test Results
+
+```
+make demo
+  → postgres + redis healthy
+  → Hardhat :8545, contracts deployed, market tables reset, 20 seeded wallets
+  → GET /health → status ok (postgres, redis, chain_rpc, demo_mode, simulation_running)
+  → interval 1 opens → clear → settle → meter → reputation → interval 2
+  → http://localhost:3000 serves all app routes (200)
+
+CI extras: gitleaks secret scan; npm/pip audit (advisory); frontend PRIVATE_KEY grep
+Local: make security
+Sepolia: optional — see docs/DEPLOY.md; localhost remains the demo default
+```
+
+Built:
+- Security: `.gitleaks.toml`, CI secret scan, CORS allow-list via `CORS_ORIGINS`,
+  `scripts/security-pass.sh`, Dockerfiles (backend + frontend standalone)
+- Demo: `make demo` / `scripts/demo.sh` (45s intervals, 20 bots, pre-funded Hardhat wallets)
+- Docs: `ARCHITECTURE` · `MATH` · `CONTRACTS` · `DEPLOY` · `DEMO` · screenshots index
+- Decisions: `docs/DECISIONS.md` (Phase 12)
 
 ---
 

@@ -1,0 +1,11 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployed": false,
+  "note": "Local Hardhat remains the default demo chain. Deploy with: SEPOLIA_RPC_URL=... OPERATOR_PRIVATE_KEY=... npm run deploy:sepolia — then replace addresses below and verify on Etherscan.",
+  "MockINR": null,
+  "Registry": null,
+  "ReputationAnchor": null,
+  "Settlement": null,
+  "Ping": null
+}

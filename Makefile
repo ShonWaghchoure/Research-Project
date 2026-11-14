@@ -1,8 +1,12 @@
-.PHONY: dev test lint reset-db gen-api experiments-smoke experiments-plot
+.PHONY: dev demo test lint reset-db gen-api experiments-smoke experiments-plot security sync-contracts
 
 BACKEND_DIR  := backend
 FRONTEND_DIR := frontend
 CONTRACTS_DIR := contracts
+
+# ─── demo (one-click) ───────────────────────────────────────────────────────
+demo:
+	bash scripts/demo.sh
 
 # ─── dev ────────────────────────────────────────────────────────────────────
 dev:
@@ -14,11 +18,12 @@ dev:
 	@sleep 3
 	@echo "📦  Deploying contracts to localhost…"
 	cd $(CONTRACTS_DIR) && npx hardhat run scripts/deploy.ts --network localhost
+	@$(MAKE) sync-contracts
 	@echo "🗄  Migrating + seeding DB…"
 	cd $(BACKEND_DIR) && .venv/bin/alembic upgrade head
 	cd $(BACKEND_DIR) && .venv/bin/python -m app.db.seed
 	@echo "🚀  Starting backend + frontend (demo mode)…"
-	DEMO_MODE=1 INTERVAL_SECONDS=45 DEMO_BOT_COUNT=10 bash scripts/run-dev.sh
+	DEMO_MODE=1 INTERVAL_SECONDS=45 DEMO_BOT_COUNT=20 bash scripts/run-dev.sh
 
 # ─── test ───────────────────────────────────────────────────────────────────
 test:
@@ -58,3 +63,11 @@ experiments-smoke:
 
 experiments-plot:
 	cd experiments && ../backend/.venv/bin/python figures/plot_all.py
+
+# ─── Phase 12 ───────────────────────────────────────────────────────────────
+security:
+	bash scripts/security-pass.sh
+
+sync-contracts:
+	cp $(CONTRACTS_DIR)/deployments/localhost.json $(FRONTEND_DIR)/src/contracts/localhost.json
+	@echo "synced frontend/src/contracts/localhost.json"

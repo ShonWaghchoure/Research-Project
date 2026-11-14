@@ -411,3 +411,28 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 5. **E9 gas is optional.** Scalability metrics always include clearing wall-time (`mean_clear_ms`).
    On-chain gas-per-interval requires a local Hardhat node and is documented as a follow-up in
    RESULTS.md rather than blocking the phase.
+
+---
+
+## Phase 12: Hardening, deploy, docs
+
+1. **Local Hardhat is the demo default.** Sepolia deploy is optional (`npm run deploy:sepolia` +
+   `deployments/sepolia.json`). One-click path is `make demo` → Docker Postgres/Redis + Hardhat +
+   seed of 20 Hardhat accounts + `INTERVAL_SECONDS=45` bots.
+
+2. **CORS is configurable.** `CORS_ORIGINS` (`*` local; comma-list in production). Credentials are
+   enabled only when origins are an explicit allow-list (browsers reject `*` + credentials).
+
+3. **Secret scanning in CI.** Gitleaks with allowlist for well-known Hardhat demo keys and the
+   placeholder JWT secret. Frontend CI fails if `PRIVATE_KEY` / `mnemonic` appear under `src/`.
+
+4. **Dockerfiles ship for hosting.** Backend image runs alembic + uvicorn; frontend uses
+   `output: "standalone"`. Compose still runs infra only (postgres + redis); app images are for
+   VM / Railway-style deploys — see `docs/DEPLOY.md`.
+
+5. **Docs split by audience.** Architecture / math / contracts / deploy / demo scripts live under
+   `docs/`; README quick start is `make demo` only.
+
+6. **Hardhat restart vs DB.** Confirmed `transactions` rows from a previous local chain must not
+   block re-send. `ChainClient` re-checks receipts on the live RPC before skipping; `make demo`
+   also runs `python -m app.db.reset_market` after deploy so intervals start clean.
