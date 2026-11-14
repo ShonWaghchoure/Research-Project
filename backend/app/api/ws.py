@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -20,7 +21,7 @@ router = APIRouter(tags=["ws"])
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    channels: str = Query("interval,price,trades"),
+    channels: str = Query("interval,price,trades,reputation,flags,grid"),
 ) -> None:
     await websocket.accept()
     requested = [c.strip() for c in channels.split(",") if c.strip()]
@@ -39,11 +40,14 @@ async def websocket_endpoint(
         while True:
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if msg and msg.get("type") == "message":
-                payload: dict[str, Any] = {
-                    "channel": msg["channel"],
-                    "data": msg["data"],
-                }
-                await websocket.send_json(payload)
+                try:
+                    data: Any = json.loads(msg["data"])
+                except (TypeError, json.JSONDecodeError):
+                    logger.warning("ws_invalid_pubsub_payload", channel=msg.get("channel"))
+                    continue
+                await websocket.send_json(
+                    {"channel": msg["channel"], "type": "update", "data": data}
+                )
             else:
                 await asyncio.sleep(0.05)
 

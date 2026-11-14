@@ -23,6 +23,7 @@ class MarketParams:
     beta: float = 25.0  # <= 5% of (p_ret - p_fit) = 25.0 paise
     match_lambda: float = 1.0  # proportional-share soft penalty weight
     dt_hours: float = 0.25  # interval length for kWh→kW conversion
+    q_base_kwh: float = 2.0  # reputation volume-cap base per interval
 
     # Reputation scoring weights: (w_del, w_rev, w_hon, w_col)
     w_del: float = 0.45

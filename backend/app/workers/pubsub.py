@@ -48,3 +48,7 @@ def publish_reputation(payload: dict[str, Any]) -> None:
 
 def publish_flags(payload: dict[str, Any]) -> None:
     publish("flags", payload)
+
+
+def publish_grid(payload: dict[str, Any]) -> None:
+    publish("grid", payload)

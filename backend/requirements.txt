@@ -83,8 +83,6 @@ yarl==1.25.1
 # Phase 3: reputation, detection and fairness
 networkx==3.7
 scikit-learn==1.9.1
-numpy==2.5.4
-scikit-learn==1.7.2
 # Phase 6: auth, rate limit, structured logs
 PyJWT==2.15.1
 slowapi==0.1.10

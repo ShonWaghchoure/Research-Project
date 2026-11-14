@@ -18,6 +18,8 @@ from app.api import (
     admin,
     audit,
     auth,
+    fairness,
+    grid,
     intervals,
     participants,
     positions,
@@ -95,6 +97,8 @@ app.include_router(intervals.router)
 app.include_router(positions.router)
 app.include_router(trades.router)
 app.include_router(reputation_api.router)
+app.include_router(grid.router)
+app.include_router(fairness.router)
 app.include_router(ws.router)
 
 

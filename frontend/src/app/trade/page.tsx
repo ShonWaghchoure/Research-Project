@@ -240,10 +240,10 @@ function PositionCard({ interval }: { interval: ReturnType<typeof useCurrentInte
   const commit = useMutation({
     mutationFn: async (p: Position) => {
       const hash = await tx.run({ ...contracts.Settlement, functionName: "commitPosition", args: [BigInt(p.interval_id), p.commit_hash] });
-      return hash;
+      return api.positions.commit(p.id, hash);
     },
-    onSuccess: (_hash, p) => {
-      setPosition({ ...p, committed_tx: _hash });
+    onSuccess: (committed, p) => {
+      setPosition(committed);
       qc.invalidateQueries({ queryKey: queryKeys.positionsMine });
       setPhase("await-reveal");
     },
