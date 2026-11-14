@@ -22,6 +22,9 @@ export interface Health {
   chain_rpc: string;
   block_number: number | null;
   chain_id: number;
+  demo_mode?: boolean;
+  interval_seconds?: number;
+  simulation_running?: boolean;
 }
 
 // ---- Phase 7 (assumed shapes) -------------------------------------------------
@@ -190,4 +193,121 @@ export interface WsMessage<T = unknown> {
   channel: "interval" | "price" | "trades" | "reputation" | "flags" | "grid";
   type: string;
   data: T;
+}
+
+// ---- Phase 10 ---------------------------------------------------------------
+
+export type AttackScenario =
+  | "sybil_farm"
+  | "collusion_ring"
+  | "price_manipulation"
+  | "false_reports"
+  | "defect_after_trust";
+
+export interface AttackRunRequest {
+  scenario: AttackScenario;
+  params: Record<string, number | string | boolean>;
+  defenses: "on" | "off";
+}
+
+export interface AttackSeriesPoint {
+  interval: number;
+  p_ref?: number | null;
+  sdr?: number | null;
+  jain?: number | null;
+  gini?: number | null;
+  hhi?: number | null;
+  mean_reputation?: number | null;
+}
+
+export interface AttackRunResult {
+  id: number;
+  scenario: AttackScenario;
+  defenses: boolean;
+  params: Record<string, unknown>;
+  status: string;
+  summary: Record<string, unknown>;
+  series: AttackSeriesPoint[];
+  attacker_profit_paise: number;
+  plain_summary: string;
+  created_at: string;
+}
+
+export interface HashTriple {
+  stored: string | null;
+  recomputed: string | null;
+  on_chain: string | null;
+  stored_matches_recomputed: boolean | null;
+  stored_matches_on_chain: boolean | null;
+  recomputed_matches_on_chain: boolean | null;
+}
+
+export interface AuditReport {
+  interval_id: number;
+  state: string;
+  engine_version: string | null;
+  p_ref_paise: number | null;
+  sdr: number | null;
+  positions: {
+    participant_id: number;
+    side: string;
+    qty_wh: number;
+    limit_price_paise: number;
+    revealed: boolean;
+  }[];
+  trades: {
+    buyer_id: number;
+    seller_id: number;
+    qty_wh: number;
+    price_paise: number;
+  }[];
+  input_root: HashTriple;
+  result_hash: HashTriple;
+  merkle_leaves: Record<string, unknown>[];
+  explorer: Record<string, string | null | undefined>;
+}
+
+export interface AuditRerunResponse {
+  interval_id: number;
+  engine_version_stored: string | null;
+  engine_version_now: string;
+  input_root: HashTriple;
+  result_hash: HashTriple;
+  match: boolean;
+  note: string;
+}
+
+export interface FlagOut {
+  id: number;
+  participant_id: number | null;
+  interval_id: number | null;
+  kind: string;
+  severity: string;
+  status: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: number | null;
+}
+
+export interface AuditLogOut {
+  id: number;
+  actor_user_id: number | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  ip: string | null;
+  created_at: string;
+}
+
+export interface SimControlState {
+  running: boolean;
+  interval_seconds: number;
+  override_active: boolean;
+}
+
+export interface ConfigMap {
+  values: Record<string, number | string | boolean>;
 }

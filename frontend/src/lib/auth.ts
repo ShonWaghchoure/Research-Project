@@ -74,3 +74,9 @@ export function useIsSignedIn(connectedAddress?: string | null): boolean {
   if (!connectedAddress) return false;
   return address.toLowerCase() === connectedAddress.toLowerCase();
 }
+
+/** True when the signed-in user has the admin role. */
+export function useIsAdmin(): boolean {
+  const role = useAuth((s) => s.role);
+  return role === "admin";
+}

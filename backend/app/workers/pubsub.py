@@ -44,3 +44,7 @@ def publish_trades(payload: dict[str, Any]) -> None:
 
 def publish_reputation(payload: dict[str, Any]) -> None:
     publish("reputation", payload)
+
+
+def publish_flags(payload: dict[str, Any]) -> None:
+    publish("flags", payload)

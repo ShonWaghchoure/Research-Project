@@ -9,10 +9,9 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.chain.client import ChainClient, get_chain_client
-from app.core.config import settings
 from app.db.models import Interval, IntervalState
 from app.db.session import SessionLocal
-from app.workers import clearing, meter, poster, reputation
+from app.workers import clearing, detection, meter, poster, reputation, sim_control
 from app.workers.phase_timing import (
     STATE_ORDER,
     commit_deadline_ts,
@@ -48,7 +47,7 @@ def _schedule_window(
     starts: datetime | None = None,
 ) -> tuple[datetime, datetime, int, int]:
     """Build starts/ends and on-chain deadlines anchored to chain time."""
-    duration = int(settings.INTERVAL_SECONDS)
+    duration = int(sim_control.interval_seconds())
     chain_now = int(client.w3.eth.get_block("latest")["timestamp"])
     wall = _now()
     start = starts or wall
@@ -163,6 +162,8 @@ def _run_hooks(db: Session, interval: Interval, client: ChainClient) -> None:
         if interval.delivery_root:
             _safe_hook("reputation", interval, lambda: reputation.run(db, interval, client=client))
             db.refresh(interval)
+            _safe_hook("detection", interval, lambda: detection.maybe_run_after_metered(db, interval))
+            db.refresh(interval)
 
 
 def _advance_to(db: Session, interval: Interval, target: IntervalState, client: ChainClient) -> Interval:
@@ -189,6 +190,8 @@ def _advance_to(db: Session, interval: Interval, target: IntervalState, client: 
 
 def tick(client: ChainClient | None = None) -> None:
     """Single scheduler tick. Never raises to the caller."""
+    if not sim_control.is_running():
+        return
     client = client or get_chain_client()
     db = SessionLocal()
     try:

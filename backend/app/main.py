@@ -14,11 +14,12 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from web3 import Web3
 
-from app.api import admin, auth, intervals, participants, positions, reputation_api, trades, ws
+from app.api import admin, audit, auth, intervals, participants, positions, reputation_api, trades, ws
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import setup_logging
 from app.db.session import engine
+from app.workers import sim_control
 from app.workers.scheduler import start_scheduler, stop_scheduler
 
 setup_logging()
@@ -46,7 +47,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Fair and Trustworthy P2P Energy Trading API",
-    version="0.7.0",
+    version="0.10.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -67,6 +68,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(participants.router)
 app.include_router(admin.router)
+app.include_router(audit.router)
 app.include_router(intervals.router)
 app.include_router(positions.router)
 app.include_router(trades.router)
@@ -141,5 +143,6 @@ def health_check(request: Request) -> Dict[str, Any]:
         "block_number": block_number,
         "chain_id": settings.CHAIN_ID,
         "demo_mode": settings.DEMO_MODE,
-        "interval_seconds": settings.INTERVAL_SECONDS,
+        "interval_seconds": sim_control.interval_seconds(),
+        "simulation_running": sim_control.is_running(),
     }

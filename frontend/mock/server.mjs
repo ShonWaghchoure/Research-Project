@@ -97,6 +97,38 @@ let nextIntervalId = Number(process.env.MOCK_FIRST_INTERVAL ?? Math.floor(Date.n
 let nextId = 1;
 let prevPRef = null;
 
+// Phase 10 mock state
+const HARDHAT_ADMIN = getAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+const configValues = {
+  p_fit: 300,
+  p_ret: 800,
+  k: 2,
+  alpha: 0.7,
+  c: 3,
+  r_ref: 0.8,
+  rho_min: 0.3,
+  r_cap: 0.9,
+  beta: 25,
+  w_del: 0.45,
+  w_rev: 0.15,
+  w_hon: 0.2,
+  w_col: 0.2,
+  half_life_intervals: 672,
+};
+/** @type {object[]} */
+const flags = [];
+/** @type {object[]} */
+const auditLog = [];
+/** @type {object[]} */
+const attackRuns = [];
+let nextFlagId = 1;
+let nextAttackId = 1;
+let nextAuditLogId = 1;
+let simRunning = true;
+let simIntervalSeconds = INTERVAL_SECONDS;
+/** @type {number | null} */
+let demoAuditIntervalId = null;
+
 const NODES = ["n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11", "n12"];
 const FEEDER_NODES = NODES.slice(1); // participants sit on n1..n12; n0 is the transformer
 const LINES = [["n0", "n1"], ["n0", "n2"], ["n0", "n3"], ["n1", "n4"], ["n1", "n5"], ["n1", "n6"], ["n2", "n7"], ["n3", "n8"], ["n3", "n9"], ["n7", "n10"], ["n10", "n11"], ["n10", "n12"]];
@@ -548,6 +580,98 @@ function auth(req) {
   return users.get(address);
 }
 
+function requireAdmin(req) {
+  const u = auth(req);
+  if (u.role !== "admin") throw new HttpError(403, "insufficient role");
+  return u;
+}
+
+function requireOperator(req) {
+  const u = auth(req);
+  if (u.role !== "admin" && u.role !== "operator") throw new HttpError(403, "insufficient role");
+  return u;
+}
+
+function pushAudit(actor, action, resourceType, resourceId, before, after) {
+  auditLog.unshift({
+    id: nextAuditLogId++,
+    actor_user_id: actor?.id ?? null,
+    action,
+    resource_type: resourceType,
+    resource_id: resourceId == null ? null : String(resourceId),
+    before,
+    after,
+    ip: "127.0.0.1",
+    created_at: new Date().toISOString(),
+  });
+  if (auditLog.length > 200) auditLog.pop();
+}
+
+function hashTriple(stored, recomputed = stored, onChain = null) {
+  const s = stored ? String(stored).toLowerCase() : null;
+  const r = recomputed ? String(recomputed).toLowerCase() : null;
+  const o = onChain ? String(onChain).toLowerCase() : null;
+  return {
+    stored: s,
+    recomputed: r,
+    on_chain: o,
+    stored_matches_recomputed: s && r ? s === r : null,
+    stored_matches_on_chain: s && o ? s === o : null,
+    recomputed_matches_on_chain: r && o ? r === o : null,
+  };
+}
+
+function mockAttackSeries(defensesOn) {
+  const series = [];
+  for (let i = 0; i < 12; i++) {
+    const attackBoost = defensesOn ? 0 : 40 + i * 2;
+    series.push({
+      interval: i,
+      p_ref: 500 + attackBoost + (i % 3) * 5,
+      sdr: Number((0.8 + i * 0.02).toFixed(3)),
+      jain: defensesOn ? 0.85 - i * 0.005 : 0.55 - i * 0.01,
+      gini: defensesOn ? 0.2 + i * 0.005 : 0.45 + i * 0.01,
+      hhi: defensesOn ? 0.12 : 0.28,
+      mean_reputation: defensesOn ? 0.7 : 0.45,
+    });
+  }
+  return series;
+}
+
+function seedPhase10() {
+  const demoRoot = keccak256(encodeAbiParameters([{ type: "string" }], ["audit-demo"]));
+  const demoIv = {
+    id: Math.max(1, nextIntervalId - 100),
+    state: "METERED",
+    starts_at: new Date(Date.now() - 3600_000).toISOString(),
+    ends_at: new Date(Date.now() - 2700_000).toISOString(),
+    commit_deadline: new Date(Date.now() - 3300_000).toISOString(),
+    reveal_deadline: new Date(Date.now() - 3000_000).toISOString(),
+    p_ref_paise: 520,
+    prev_p_ref_paise: 500,
+    sdr: 1.1,
+    active_participants: 2,
+    input_root: demoRoot,
+    result_hash: keccak256(encodeAbiParameters([{ type: "string" }], ["audit-result"])),
+    engine_version: "mock-phase10",
+    on_chain: false,
+  };
+  intervals.push(demoIv);
+  demoAuditIntervalId = demoIv.id;
+  flags.push({
+    id: nextFlagId++,
+    participant_id: 1,
+    interval_id: demoIv.id,
+    kind: "collusion",
+    severity: "medium",
+    status: "open",
+    detail: { score: 0.72, note: "mock sliding-window flag" },
+    created_at: new Date().toISOString(),
+    resolved_at: null,
+    resolved_by: null,
+  });
+}
+
 async function readBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
@@ -562,7 +686,7 @@ async function route(req, res) {
   const m = req.method;
 
   if (m === "OPTIONS") return json(res, 204);
-  if (p === "/health") return json(res, 200, { status: "ok", postgres: "mock", redis: "mock", chain_rpc: chainOk ? "ok" : "down", block_number: chainOk ? Number(await publicClient.getBlockNumber()) : null, chain_id: 31337 });
+  if (p === "/health") return json(res, 200, { status: "ok", postgres: "mock", redis: "mock", chain_rpc: chainOk ? "ok" : "down", block_number: chainOk ? Number(await publicClient.getBlockNumber()) : null, chain_id: 31337, demo_audit_interval_id: demoAuditIntervalId, simulation_running: simRunning, interval_seconds: simIntervalSeconds });
   if (p === "/docs") { res.writeHead(200, { "Content-Type": "text/plain" }); return res.end("Mock Phase 7 API. See frontend/mock/server.mjs."); }
 
   // auth
@@ -570,11 +694,26 @@ async function route(req, res) {
     const { address } = await readBody(req);
     let addr;
     try { addr = getAddress(address); } catch { throw new HttpError(422, "invalid address"); }
-    if (!users.has(addr)) users.set(addr, { id: users.size + 1, address: addr, role: "participant", participant: null });
+    if (!users.has(addr)) {
+      const role = addr === HARDHAT_ADMIN ? "admin" : "participant";
+      users.set(addr, { id: users.size + 1, address: addr, role, participant: null });
+    }
     const u = users.get(addr);
     u.nonce = randomBytes(16).toString("hex");
     u.nonceUsed = false;
     return json(res, 200, { address: addr, nonce: u.nonce, message: siweMessage(addr, u.nonce), chain_id: 31337 });
+  }
+  // Mock-only helper for Playwright: mint an admin JWT without a wallet signature.
+  if (p === "/auth/dev-login" && m === "POST") {
+    const body = await readBody(req);
+    const role = body.role === "operator" ? "operator" : "admin";
+    const addr = HARDHAT_ADMIN;
+    if (!users.has(addr)) users.set(addr, { id: users.size + 1, address: addr, role, participant: null });
+    const u = users.get(addr);
+    u.role = role;
+    const tok = `mock.${randomBytes(24).toString("hex")}`;
+    tokens.set(tok, addr);
+    return json(res, 200, { access_token: tok, token_type: "bearer", role: u.role, address: addr });
   }
   if (p === "/auth/verify" && m === "POST") {
     const { address, message, signature } = await readBody(req);
@@ -712,6 +851,179 @@ async function route(req, res) {
     const rows = fairnessHistory.filter((f) => f.baseline === baseline).slice(-limit);
     return json(res, 200, { baseline, metrics: rows });
   }
+
+  // ---- Phase 10: audit / admin / attacks ------------------------------------
+  const auditGet = p.match(/^\/audit\/(\d+)$/);
+  if (auditGet && m === "GET") {
+    const id = Number(auditGet[1]);
+    const iv = intervals.find((i) => i.id === id);
+    if (!iv) throw new HttpError(404, "interval not found");
+    const leaves = [
+      { participant_id: 1, side: "buy", qty_kwh: 2, limit_price: 800, leaf: iv.input_root },
+      { participant_id: 2, side: "sell", qty_kwh: 2, limit_price: 300, leaf: iv.result_hash },
+    ];
+    return json(res, 200, {
+      interval_id: iv.id,
+      state: iv.state,
+      engine_version: iv.engine_version ?? "mock-phase10",
+      p_ref_paise: iv.p_ref_paise,
+      sdr: iv.sdr,
+      positions: leaves.map((l) => ({
+        participant_id: l.participant_id,
+        side: l.side,
+        qty_wh: Math.round(l.qty_kwh * 1000),
+        limit_price_paise: l.limit_price,
+        revealed: true,
+      })),
+      trades: [{ buyer_id: 1, seller_id: 2, qty_wh: 2000, price_paise: iv.p_ref_paise ?? 520 }],
+      input_root: hashTriple(iv.input_root),
+      result_hash: hashTriple(iv.result_hash, null, null),
+      merkle_leaves: leaves,
+      explorer: {
+        network: "localhost",
+        settlement: SETTLEMENT.address,
+        interval_hint: `Settlement.intervals(${iv.id})`,
+        block_explorer: null,
+      },
+    });
+  }
+  const auditRerun = p.match(/^\/audit\/(\d+)\/rerun$/);
+  if (auditRerun && m === "POST") {
+    requireOperator(req);
+    const id = Number(auditRerun[1]);
+    const iv = intervals.find((i) => i.id === id);
+    if (!iv) throw new HttpError(404, "interval not found");
+    if (!iv.result_hash) throw new HttpError(400, "interval has not been cleared yet");
+    const input = hashTriple(iv.input_root, iv.input_root, null);
+    const result = hashTriple(iv.result_hash, iv.result_hash, null);
+    return json(res, 200, {
+      interval_id: iv.id,
+      engine_version_stored: iv.engine_version ?? "mock-phase10",
+      engine_version_now: "mock-phase10",
+      input_root: input,
+      result_hash: result,
+      match: true,
+      note: "",
+    });
+  }
+
+  if (p === "/admin/config" && m === "GET") {
+    requireAdmin(req);
+    return json(res, 200, { values: { ...configValues } });
+  }
+  if (p === "/admin/config" && m === "PUT") {
+    const u = requireAdmin(req);
+    const body = await readBody(req);
+    const updates = body.values ?? {};
+    const before = {};
+    const after = {};
+    for (const [k, v] of Object.entries(updates)) {
+      before[k] = configValues[k] ?? null;
+      configValues[k] = v;
+      after[k] = v;
+    }
+    pushAudit(u, "config.update", "config", Object.keys(after).join(","), before, after);
+    return json(res, 200, { values: { ...configValues } });
+  }
+
+  if (p === "/admin/flags" && m === "GET") {
+    requireAdmin(req);
+    const status = url.searchParams.get("status") ?? "open";
+    const rows = flags.filter((f) => !status || f.status === status);
+    return json(res, 200, rows);
+  }
+  const flagResolve = p.match(/^\/admin\/flags\/(\d+)\/resolve$/);
+  if (flagResolve && m === "POST") {
+    const u = requireAdmin(req);
+    const flag = flags.find((f) => f.id === Number(flagResolve[1]));
+    if (!flag) throw new HttpError(404, "flag not found");
+    if (flag.status !== "open") throw new HttpError(400, "flag already resolved");
+    const body = await readBody(req);
+    if (!["resolved", "dismissed"].includes(body.status)) throw new HttpError(422, "status: invalid");
+    const before = { status: flag.status };
+    flag.status = body.status;
+    flag.resolved_at = new Date().toISOString();
+    flag.resolved_by = u.id;
+    if (body.note) flag.detail = { ...flag.detail, resolve_note: body.note };
+    pushAudit(u, "flag.resolve", "flag", flag.id, before, { status: flag.status, note: body.note ?? null });
+    return json(res, 200, flag);
+  }
+
+  if (p === "/admin/attacks/run" && m === "POST") {
+    const u = requireAdmin(req);
+    const body = await readBody(req);
+    const scenario = body.scenario;
+    const allowed = ["sybil_farm", "collusion_ring", "price_manipulation", "false_reports", "defect_after_trust"];
+    if (!allowed.includes(scenario)) throw new HttpError(400, `unknown scenario: ${scenario}`);
+    const defensesOn = body.defenses === "on";
+    const series = mockAttackSeries(defensesOn);
+    const attacker_profit_paise = defensesOn ? 1200 : 48_000;
+    const plain_summary = defensesOn
+      ? `${scenario}: defenses on — attacker profit collapsed; median cap / reputation weighting limited impact.`
+      : `${scenario}: defenses off — attacker extracted ${attacker_profit_paise} paise of surplus.`;
+    const params = {
+      participants: Number(body.params?.participants ?? 40),
+      days: Number(body.params?.days ?? 1),
+      seed: Number(body.params?.seed ?? 42),
+      max_intervals: Number(body.params?.max_intervals ?? 24),
+    };
+    const row = {
+      id: nextAttackId++,
+      scenario,
+      defenses: defensesOn,
+      params,
+      status: "completed",
+      summary: { market: { welfare: 1 }, attacker_profit_paise },
+      series,
+      attacker_profit_paise,
+      plain_summary,
+      created_at: new Date().toISOString(),
+    };
+    attackRuns.push(row);
+    pushAudit(u, "attack.run", "attack_run", scenario, null, { scenario, defenses: defensesOn, params });
+    return json(res, 200, row);
+  }
+
+  if (p === "/admin/simulation" && m === "GET") {
+    requireAdmin(req);
+    return json(res, 200, {
+      running: simRunning,
+      interval_seconds: simIntervalSeconds,
+      override_active: simIntervalSeconds !== INTERVAL_SECONDS,
+    });
+  }
+  if (p === "/admin/simulation/start" && m === "POST") {
+    const u = requireAdmin(req);
+    simRunning = true;
+    const state = { running: simRunning, interval_seconds: simIntervalSeconds, override_active: simIntervalSeconds !== INTERVAL_SECONDS };
+    pushAudit(u, "simulation.start", "simulation", "live", null, state);
+    return json(res, 200, state);
+  }
+  if (p === "/admin/simulation/stop" && m === "POST") {
+    const u = requireAdmin(req);
+    simRunning = false;
+    const state = { running: simRunning, interval_seconds: simIntervalSeconds, override_active: simIntervalSeconds !== INTERVAL_SECONDS };
+    pushAudit(u, "simulation.stop", "simulation", "live", null, state);
+    return json(res, 200, state);
+  }
+  if (p === "/admin/simulation/speed" && m === "PUT") {
+    const u = requireAdmin(req);
+    const body = await readBody(req);
+    const sec = Number(body.interval_seconds);
+    if (!Number.isInteger(sec) || sec < 5 || sec > 3600) throw new HttpError(400, "interval_seconds out of range");
+    const before = { running: simRunning, interval_seconds: simIntervalSeconds, override_active: simIntervalSeconds !== INTERVAL_SECONDS };
+    simIntervalSeconds = sec;
+    const state = { running: simRunning, interval_seconds: simIntervalSeconds, override_active: true };
+    pushAudit(u, "simulation.speed", "simulation", "live", before, state);
+    return json(res, 200, state);
+  }
+
+  if (p === "/admin/audit-log" && m === "GET") {
+    requireAdmin(req);
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    return json(res, 200, auditLog.slice(0, limit));
+  }
+
   throw new HttpError(404, "not found");
 }
 
@@ -744,9 +1056,10 @@ wss.on("connection", (ws) => {
 // ---- start ---------------------------------------------------------------------------
 await probeChain();
 seedHistory();
+seedPhase10();
 await seedReputationProof();
 newInterval();
 setInterval(tick, 500);
 server.listen(PORT, () => {
-  console.log(`[mock] Phase 7/9 mock API on http://localhost:${PORT} (ws: /ws), interval ${INTERVAL_SECONDS}s, chain ${chainOk ? "connected" : "unreachable (chain-less mode)"}`);
+  console.log(`[mock] Phase 7/9/10 mock API on http://localhost:${PORT} (ws: /ws), interval ${INTERVAL_SECONDS}s, chain ${chainOk ? "connected" : "unreachable (chain-less mode)"}`);
 });

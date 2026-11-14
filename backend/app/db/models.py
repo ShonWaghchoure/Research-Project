@@ -345,6 +345,23 @@ class AuditLog(Base):
     )
 
 
+class AttackRun(Base):
+    """Isolated Phase 4 scenario run triggered from the attack lab (not the live market)."""
+
+    __tablename__ = "attack_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scenario: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    defenses: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Transaction(Base):
     """Idempotent record of every chain write (Phase 7 uses this)."""
 

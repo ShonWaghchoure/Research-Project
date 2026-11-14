@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { MOBILE_NAV, NAV, SECONDARY_NAV, type NavItem } from "./nav";
+import { filterNav, MOBILE_NAV, NAV, SECONDARY_NAV, type NavItem } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 import { WalletButton } from "./wallet-button";
+import { useAuth } from "@/lib/auth";
 import { useMarketSocket } from "@/lib/ws";
 
 function NavLink({ item, mobile = false }: { item: NavItem; mobile?: boolean }) {
@@ -30,8 +31,11 @@ function NavLink({ item, mobile = false }: { item: NavItem; mobile?: boolean }) 
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const role = useAuth((s) => s.role);
   const bare = pathname === "/" || pathname.startsWith("/onboarding");
   const socket = useMarketSocket(!bare);
+  const primary = filterNav(NAV, role);
+  const mobile = filterNav(MOBILE_NAV, role);
 
   return (
     <div className="flex min-h-screen">
@@ -46,7 +50,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             P2P Energy Market
           </Link>
           <nav aria-label="Primary" className="flex flex-col gap-0.5 px-2">
-            {NAV.map((item) => (
+            {primary.map((item) => (
               <NavLink key={item.href} item={item} />
             ))}
           </nav>
@@ -92,7 +96,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           aria-label="Primary"
           className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-surface-raised md:hidden"
         >
-          {MOBILE_NAV.map((item) => (
+          {mobile.map((item) => (
             <NavLink key={item.href} item={item} mobile />
           ))}
         </nav>

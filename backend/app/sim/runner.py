@@ -88,6 +88,8 @@ class SimConfig:
     q_base_kwh: float = 2.0  # volume cap base per interval (Q_base)
     detection_every: int = 12
     sign_meters: bool = True
+    # Cap total intervals (Phase 10 attack lab / tests). None = days * SLOTS_PER_DAY.
+    max_intervals: Optional[int] = None
 
 
 @dataclass
@@ -285,6 +287,8 @@ def run(cfg: SimConfig, out_dir: str | Path) -> Dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
 
     intervals = cfg.days * SLOTS_PER_DAY
+    if cfg.max_intervals is not None:
+        intervals = max(1, min(intervals, int(cfg.max_intervals)))
     seeds = np.random.SeedSequence(cfg.seed).spawn(3 + cfg.participants + sc.sybil_count)
     weather = Weather.generate(intervals, np.random.default_rng(seeds[0]), sc.cloud_volatility)
     b1_rng = np.random.default_rng(seeds[2])
@@ -735,7 +739,12 @@ def _write_participants_and_summary(
     honest = [p for p in people if p.bot.kind == "honest" and not p.bot.group]
     summary: Dict[str, Any] = {
         "scenario": cfg.scenario, "mode": cfg.mode, "defenses": cfg.defenses, "seed": cfg.seed,
-        "participants": len(people), "intervals": cfg.days * SLOTS_PER_DAY,
+        "participants": len(people),
+        "intervals": (
+            min(cfg.days * SLOTS_PER_DAY, int(cfg.max_intervals))
+            if cfg.max_intervals is not None
+            else cfg.days * SLOTS_PER_DAY
+        ),
         "market": agg(people),
         "honest": agg(honest),
         "groups": {g: agg([p for p in people if p.bot.group == g]) for g in groups},

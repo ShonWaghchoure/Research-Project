@@ -31,6 +31,7 @@ from app.reputation.score import (
     update,
 )
 from app.reputation.tiers import Tier, classify
+from app.workers.detection import latest_detection_scores
 from app.workers.pubsub import publish_reputation
 
 logger = structlog.get_logger(__name__)
@@ -125,10 +126,12 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
             except ValueError:
                 prev_tier = None
 
+        c_i, a_i = latest_detection_scores(db, part.id)
+
         if part.id in reveal_misses or (
             part.id in committed_ids and part.id not in revealed_ids
         ):
-            ev: Evidence | None = reveal_miss_evidence()
+            ev: Evidence | None = reveal_miss_evidence(anomaly=a_i, collusion=c_i)
         elif part.id in volume or part.id in promised:
             r_del = delivery_ratio(promised.get(part.id, 0), delivered.get(part.id, 0))
             r_rev = 1.0 if part.id in revealed_ids else 1.0
@@ -138,10 +141,17 @@ def run(db: Session, interval: Interval, client: ChainClient | None = None) -> N
             ev = Evidence(
                 r_del=r_del,
                 r_rev=r_rev,
+                anomaly=a_i,
+                collusion=c_i,
                 volume_kwh=volume.get(part.id, 0.0),
             )
         elif part.id in committed_ids:
-            ev = Evidence(r_del=1.0, r_rev=1.0 if part.id in revealed_ids else 0.0)
+            ev = Evidence(
+                r_del=1.0,
+                r_rev=1.0 if part.id in revealed_ids else 0.0,
+                anomaly=a_i,
+                collusion=c_i,
+            )
         else:
             ev = None  # idle decay
 

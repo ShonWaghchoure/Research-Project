@@ -6,7 +6,7 @@ import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.core.config import settings
-from app.workers import bots, clock, listener
+from app.workers import bots, clock, listener, sim_control
 
 logger = structlog.get_logger(__name__)
 
@@ -14,9 +14,10 @@ _scheduler: BackgroundScheduler | None = None
 
 
 def _job() -> None:
-    clock.tick()
-    bots.tick()
-    listener.tick()
+    if sim_control.is_running():
+        clock.tick()
+        bots.tick()
+    listener.tick()  # always index chain events even when paused
 
 
 def start_scheduler() -> BackgroundScheduler | None:

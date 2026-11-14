@@ -22,7 +22,7 @@ on-chain escrow and settlement, and a manipulation-resistant reputation system.
 | **7** | Market lifecycle | ✅ **Done** |
 | **8** | Frontend foundation | ✅ **Done** |
 | **9** | Frontend market views | ✅ **Done** |
-| 10 | Attack lab, audit, admin | ⬜ Pending |
+| **10** | Attack lab, audit, admin | ✅ **Done** |
 | 11 | Experiments | ⬜ Pending |
 | 12 | Hardening, deploy, docs | ⬜ Pending |
 
@@ -58,11 +58,13 @@ fair-and-trustworthy/
 │   │   ├── reputation/       # PURE functions: score, tiers, sybil, fairness
 │   │   ├── sim/              # Headless simulator + bots + baselines
 │   │   ├── chain/            # web3.py client + nonce manager
-│   │   └── workers/          # APScheduler jobs: clock, clearing, poster, meter, reputation
+│   │   └── workers/          # clock, clearing, poster, meter, reputation, detection, sim_control
 │   ├── alembic/              # DB migrations
 │   └── tests/                # pytest (unit + integration)
 ├── frontend/                 # Next.js 14 App Router + wagmi 2 + Tailwind
-│   └── src/app/              # Pages: health dashboard → full market UI
+│   └── src/app/              # Pages: dashboard, trade, market, grid, reputation,
+│                             #        fairness, attack, audit, admin, status
+├── experiments/              # Phase 11: E1–E10 runners + notebooks (in progress)
 ├── docker-compose.yml        # postgres:16-alpine (port 5433) + redis:7-alpine
 ├── Makefile                  # dev · test · lint · reset-db
 ├── .env.example              # all required variables
@@ -71,7 +73,7 @@ fair-and-trustworthy/
     ├── DECISIONS.md          # design decision log
     ├── ARCHITECTURE.md       # (Phase 12)
     ├── MATH.md               # (Phase 12)
-    └── RESULTS.md            # (Phase 11)
+    └── RESULTS.md            # Phase 11 figure ↔ command map
 ```
 
 ---
@@ -458,6 +460,51 @@ Built:
 - `backend/alembic/versions/a7c1d2e3f405_phase7_position_deadline.py`
 
 Tests: `backend/tests/integration/test_phase7_lifecycle.py`
+
+---
+
+## Phase 10 Smoke Test Results
+
+Attack lab, public audit, admin console, and advisory detection are live.
+Attack runs use the Phase 4 simulator in an isolated temp directory (never the
+live market). Detection writes flags only — no auto-ban.
+
+```
+cd backend && .venv/bin/alembic upgrade head
+  → b8d2e3f4a506 phase10_attack_runs
+
+pytest tests/api/test_admin_flags.py tests/api/test_audit.py \
+       tests/api/test_attacks.py tests/workers/test_detection.py -q
+  → 12 passed
+  - flags: list / resolve / dismiss; non-admin 403
+  - audit: public GET report; operator re-run hash equality
+  - attacks: each scenario returns series + attacker_profit_paise;
+    Sybil defenses-on reduces attacker advantage vs defenses-off
+  - detection: Flag + ReputationEvent(c_i, a_i) every 12 metered intervals
+
+ruff check (Phase 10 modules) → All checks passed
+
+cd frontend
+npx tsc --noEmit              → no errors
+npm test -- --run             → 43 passed
+npx playwright test e2e/phase10-attack-audit.spec.ts
+  → 3 passed
+  - /audit loads Merkle leaves + hash compare for seeded interval
+  - admin runs Sybil off-then-on; profit meter shows collapse
+  - non-admin /admin shows gate, no Market parameters
+```
+
+Pages: `/attack`, `/audit`, `/admin` (admin nav role-filtered).
+
+Built:
+- Backend: `app/api/{audit,audit_service,attacks_service}.py`,
+  `app/schemas/{attacks,audit,flags}.py`, `app/workers/{detection,sim_control}.py`,
+  admin routes for flags / attacks / simulation / audit-log,
+  migration `b8d2e3f4a506_phase10_attack_runs.py`
+- Frontend: attack lab, audit (HashCompare, MerkleViewer, ExplorerLinks),
+  admin (ConfigEditor, FlagQueue, SimControls, AuditLogTable),
+  mock Phase 10 routes + `POST /auth/dev-login` for Playwright
+- Decisions: `docs/DECISIONS.md` (Phase 10)
 
 ---
 

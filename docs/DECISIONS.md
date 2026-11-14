@@ -360,3 +360,29 @@ edge-case document (cases 1-22), the Phase 3 hand-off notes, and Phase 2/5 conve
 
 11. **`/status`.** Shon's Phase 6 health and login demo page is kept as a plain System status page
     (backend health, session, contract addresses) instead of being deleted.
+
+---
+
+## Phase 10: Attack lab, audit, admin, detection
+
+1. **Detection job is advisory only.** `workers/detection.py` runs every 12 metered intervals, writes
+   `Flag` rows and `ReputationEvent(event_type="detection")` payloads with `c_i` / `a_i`. The reputation
+   worker reads the latest detection event per participant and feeds those scores into `Evidence`. Flags
+   never auto-ban or suspend; admins resolve/dismiss via `/admin/flags`.
+
+2. **Attack lab is isolated from the live market.** `POST /admin/attacks/run` calls Phase 4 `sim.runner`
+   in a temp directory with `max_intervals` capped (default 24, min 12) so the UI stays interactive.
+   Results are stored in `attack_runs` and never touch live intervals, positions, or the chain.
+
+3. **Simulation start/stop/speed is process-local.** `workers/sim_control.py` gates `clock.tick` and
+   overrides interval length in memory. Defaults come from settings at process start; changes are not
+   persisted to the config table (config remains the durable market-parameter store).
+
+4. **Audit re-run rebuilds reputation as-of clearing.** `POST /audit/{id}/rerun` reconstructs engine
+   positions using reputation scores from intervals strictly before the target, then calls
+   `clear_interval` and compares stored vs recomputed input root and result hash. Public GET is
+   unauthenticated; re-run requires operator or admin.
+
+5. **Admin nav is role-filtered.** The `/admin` nav item and page content require `role === "admin"`.
+   Attack lab is visible to everyone but run buttons require an admin JWT. The mock API adds
+   `POST /auth/dev-login` for Playwright only.

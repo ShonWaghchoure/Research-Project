@@ -1,6 +1,13 @@
 import type {
+  AttackRunRequest,
+  AttackRunResult,
+  AuditLogOut,
+  AuditReport,
+  AuditRerunResponse,
+  ConfigMap,
   FairnessBaseline,
   FairnessHistory,
+  FlagOut,
   GridStatus,
   Health,
   Interval,
@@ -16,6 +23,7 @@ import type {
   Reputation,
   ReputationHistory,
   ReputationProof,
+  SimControlState,
   TokenResponse,
   Trade,
 } from "./types";
@@ -155,4 +163,50 @@ export const api = {
   grid: () => request<GridStatus>("/grid/status", { auth: false }),
   fairnessHistory: (baseline: FairnessBaseline = "B3", limit = 96) =>
     request<FairnessHistory>(`/fairness/history${qs({ baseline, limit })}`, { auth: false }),
+
+  // Phase 10
+  audit: {
+    get: (intervalId: number) =>
+      request<AuditReport>(`/audit/${intervalId}`, { auth: false }),
+    rerun: (intervalId: number) =>
+      request<AuditRerunResponse>(`/audit/${intervalId}/rerun`, { method: "POST" }),
+  },
+  admin: {
+    config: {
+      get: () => request<ConfigMap>("/admin/config"),
+      put: (values: Record<string, unknown>) =>
+        request<ConfigMap>("/admin/config", {
+          method: "PUT",
+          body: JSON.stringify({ values }),
+        }),
+    },
+    flags: {
+      list: (status = "open") =>
+        request<FlagOut[]>(`/admin/flags${qs({ status })}`),
+      resolve: (id: number, body: { status: "resolved" | "dismissed"; note?: string }) =>
+        request<FlagOut>(`/admin/flags/${id}/resolve`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+    },
+    attacks: {
+      run: (body: AttackRunRequest) =>
+        request<AttackRunResult>("/admin/attacks/run", {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+    },
+    simulation: {
+      get: () => request<SimControlState>("/admin/simulation"),
+      start: () => request<SimControlState>("/admin/simulation/start", { method: "POST" }),
+      stop: () => request<SimControlState>("/admin/simulation/stop", { method: "POST" }),
+      speed: (interval_seconds: number) =>
+        request<SimControlState>("/admin/simulation/speed", {
+          method: "PUT",
+          body: JSON.stringify({ interval_seconds }),
+        }),
+    },
+    auditLog: (limit = 100) =>
+      request<AuditLogOut[]>(`/admin/audit-log${qs({ limit })}`),
+  },
 };

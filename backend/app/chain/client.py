@@ -416,6 +416,10 @@ class ChainClient:
         iv = self.on_chain_interval(interval_id)
         return bool(_iv_field(iv, 4, "deliveryPosted"))
 
+    def on_chain_input_root(self, interval_id: int) -> Optional[str]:
+        iv = self.on_chain_interval(interval_id)
+        return _bytes32_hex(_iv_field(iv, 5, "inputRoot"))
+
     def on_chain_result_hash(self, interval_id: int) -> Optional[str]:
         iv = self.on_chain_interval(interval_id)
         return _bytes32_hex(_iv_field(iv, 6, "resultHash"))
